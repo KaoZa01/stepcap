@@ -154,12 +154,29 @@ def edit_text(hwnd) -> str:
     return buf.value
 
 
-def export_async(gid, body):
+def export_async(gid, body, route="export"):
     out = {}
     t = __import__("threading").Thread(
-        target=lambda: out.setdefault("r", post(f"/api/guide/{gid}/export", body)))
+        target=lambda: out.setdefault("r", post(f"/api/guide/{gid}/{route}", body)))
     t.start()
     return t, out
+
+
+def _img(fmt: str) -> bytes:
+    from io import BytesIO
+    from PIL import Image
+    b = BytesIO()
+    Image.new("RGB", (8, 6), (0, 128, 255)).save(b, fmt)
+    return b.getvalue()
+
+
+def head_type(path):
+    url = f"http://127.0.0.1:{CTX['port']}{path}?t={CTX['token']}"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as r:
+            return r.status, r.headers.get("Content-Type")
+    except urllib.error.HTTPError as e:
+        return e.code, None
 
 
 def affinity(hwnd) -> int:
@@ -301,6 +318,34 @@ def test_export_save_as():
     assert target.read_text(encoding="utf-8") == "<html>สวัสดี</html>"
 
 
+def test_upload_and_content_types():
+    png, gif = _img("PNG"), _img("GIF")
+    steps_before = get(f"/api/guide/{OLD_ID}")["steps"]
+    name = post(f"/api/guide/{OLD_ID}/image", png)["image"]
+    assert head_type(f"/img/{OLD_ID}/{name}") == (200, "image/png")
+    gname = post(f"/api/guide/{OLD_ID}/image", gif)["image"]
+    assert head_type(f"/img/{OLD_ID}/{gname}") == (200, "image/gif")
+    assert post(f"/api/guide/{OLD_ID}/image", b"<html>") == 400
+    assert get(f"/api/guide/{OLD_ID}")["steps"] == steps_before  # upload changes no step
+    assert head_type(f"/img/{OLD_ID}/guide.json")[0] == 404      # not an image type
+
+
+def test_download_save_as():
+    assert post(f"/api/guide/{OLD_ID}/download?n=2", b"hello") == 400  # no dialog
+    target = CTX["storage"] / "step2.png"
+    body = _img("PNG")
+    t, out = export_async(OLD_ID + "", body, route="download?n=2")
+    dlg = wait(lambda: save_dialog(CTX["pid"]), 10)
+    assert dlg, "no Save As dialog appeared"
+    box = next(e for e in child_edits(dlg) if edit_text(e).endswith(".png"))
+    assert edit_text(box).endswith("09_00 - ขั้นตอน 2.png"), edit_text(box)
+    U.SendMessageW(box, WM_SETTEXT, 0, str(target))
+    U.PostMessageW(dlg, WM_COMMAND, 1, 0)  # IDOK
+    t.join(10)
+    assert Path(out["r"]["saved"]).resolve() == target.resolve(), out
+    assert target.read_bytes() == body
+
+
 def test_shutdown_not_blocked():
     """Windows shutdown/sign-out must not be vetoed by X-hides-to-tray, and a
     running recording is saved first. Runs last: it may hide the window."""
@@ -318,6 +363,7 @@ def test_shutdown_not_blocked():
 TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
          test_library_routes, test_ui_served, test_export_save_as,
+         test_upload_and_content_types, test_download_save_as,
          test_shutdown_not_blocked]
 
 if __name__ == "__main__":

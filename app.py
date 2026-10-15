@@ -83,7 +83,8 @@ def recycle(path: Path):
 # ---------------------------------------------------------------------------
 _UI_TYPES = {".js": "text/javascript; charset=utf-8",
              ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
-_GUIDE_RE = re.compile(r"/api/guide/([^/]+)(?:/(delete|meta|duplicate|export))?")
+_GUIDE_RE = re.compile(
+    r"/api/guide/([^/]+)(?:/(delete|meta|duplicate|export|image|download))?")
 _TRASH_RE = re.compile(r"/api/trash/([^/]+)/(restore|purge)")
 
 
@@ -148,8 +149,10 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 2 and library.safe_id(parts[0]) \
                     and library.safe_name(parts[1]):
                 f = STORAGE / parts[0] / parts[1]
-                if f.is_file():
-                    return self._send(200, f.read_bytes(), "image/png")
+                ext = f.suffix.lower().lstrip(".").replace("jpeg", "jpg")
+                if f.is_file() and ext in library.IMAGE_MIME:
+                    return self._send(200, f.read_bytes(),
+                                      library.IMAGE_MIME[ext])
             return self._send(404, "no image", "text/plain")
         return self._missing()
 
@@ -160,6 +163,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, "forbidden", "text/plain")
         p = u.path
         length = int(self.headers.get("Content-Length", 0))
+        if p.endswith("/image") and length > library.MAX_IMAGE:
+            self.close_connection = True  # body left unread
+            return self._send(413, "too large", "text/plain")
         body = self.rfile.read(length) if length else b""
         if p == "/api/start":
             start_rec_ui()
@@ -211,6 +217,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"id": new}) if new else self._missing()
         if action == "export":
             return self._json({"saved": export_guide(gid, body)})
+        if action == "image":
+            name = library.add_image(STORAGE, gid, body)
+            return self._json({"image": name}) if name else \
+                self._send(400, "bad image", "text/plain")
+        if action == "download":
+            kind = library.image_kind(body)
+            if kind not in ("png", "gif"):
+                return self._send(400, "bad image", "text/plain")
+            n = qs.get("n", [""])[0]
+            return self._json({"saved": download_image(
+                gid, n if n.isdigit() else "", kind, body)})
         data = _obj(body)
         if data is None:
             return self._send(400, "bad json", "text/plain")
@@ -342,21 +359,40 @@ def rec_status() -> dict:
             **REC.live()}
 
 
-def export_guide(gid: str, html: bytes) -> str | None:
-    """Ask where to save the page's export file; None when cancelled."""
+def _file_title(gid: str) -> str | None:
     g = library.read_guide(STORAGE / gid)
-    if g is None or WINDOW is None:
+    if g is None:
         return None
-    name = re.sub(r'[\\/:*?"<>|]', "_", g.get("title") or "").strip() or "guide"
-    # file_types stays ASCII: pywebview's filter parser rejects Thai marks
+    return re.sub(r'[\\/:*?"<>|]', "_", g.get("title") or "").strip() or "guide"
+
+
+def save_as(filename: str, data: bytes, file_type: str) -> str | None:
+    """Native Save As for bytes the page made; None when cancelled."""
+    if WINDOW is None:
+        return None
+    # file_type stays ASCII: pywebview's filter parser rejects Thai marks
     res = WINDOW.create_file_dialog(webview.FileDialog.SAVE,
-                                    save_filename=name + ".html",
-                                    file_types=("HTML (*.html)",))
+                                    save_filename=filename,
+                                    file_types=(file_type,))
     path = res[0] if isinstance(res, (list, tuple)) and res else res
     if not path:
         return None
-    Path(path).write_bytes(html)
+    Path(path).write_bytes(data)
     return str(path)
+
+
+def export_guide(gid: str, html: bytes) -> str | None:
+    title = _file_title(gid)
+    return save_as(title + ".html", html, "HTML (*.html)") if title else None
+
+
+def download_image(gid: str, n: str, kind: str, data: bytes) -> str | None:
+    """One step's finished image (PNG, or the original GIF)."""
+    title = _file_title(gid)
+    if title is None:
+        return None
+    name = f"{title} - ขั้นตอน {n}.{kind}" if n else f"{title}.{kind}"
+    return save_as(name, data, f"{kind.upper()} (*.{kind})")
 
 
 # ---------------------------------------------------------------------------
