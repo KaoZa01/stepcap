@@ -1,96 +1,11 @@
-<!doctype html>
-<html lang="th">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>StepCap</title>
-<style>
-  :root{
-    --bg:#f6f7f9; --card:#fff; --ink:#1a1a1a; --muted:#6b7280;
-    --line:#e3e6ea; --accent:#fb923c; --accent-ink:#9a4d06; --danger:#dc2626;
-  }
-  :root:not([data-theme="light"]){}
-  @media (prefers-color-scheme: dark){
-    :root:not([data-theme="light"]){
-      --bg:#15171b; --card:#1f2228; --ink:#e8eaed; --muted:#9aa2ad;
-      --line:#31353c; --accent-ink:#ffcf9e;
-    }
-  }
-  :root[data-theme="dark"]{
-    --bg:#15171b; --card:#1f2228; --ink:#e8eaed; --muted:#9aa2ad;
-    --line:#31353c; --accent-ink:#ffcf9e;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font-family:"Segoe UI",system-ui,"Sarabun",sans-serif;line-height:1.5}
-  header{position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--line);
-    padding:12px 16px;display:flex;gap:12px;align-items:center;z-index:10;flex-wrap:wrap}
-  header h1{font-size:18px;margin:0;flex:1;min-width:120px}
-  .wrap{max-width:720px;margin:0 auto;padding:16px}
-  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);
-    color:var(--ink);border-radius:8px;padding:7px 12px}
-  button:hover{border-color:var(--accent)}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#3a1d02;font-weight:600}
-  button.danger{color:var(--danger)}
-  input[type=text],input[type=search]{font:inherit;color:var(--ink);background:var(--card);
-    border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
-  .muted{color:var(--muted);font-size:13px}
-
-  /* gallery */
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
-    padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px}
-  .card .t{flex:1;min-width:0}
-  .card .t b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-  /* editor steps */
-  .step{background:var(--card);border:1px solid var(--line);border-radius:12px;
-    padding:14px;margin-bottom:12px}
-  .step.dragging{opacity:.4}
-  .step .row{display:flex;gap:8px;align-items:flex-start}
-  .step .num{width:26px;height:26px;border-radius:50%;background:var(--accent);
-    color:#3a1d02;font-weight:700;display:flex;align-items:center;justify-content:center;
-    flex:0 0 auto;font-size:13px;cursor:grab}
-  .step .txt{flex:1}
-  .kindtag{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-  .step .tools{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-
-  .stage{position:relative;margin-top:10px;border:1px solid var(--line);border-radius:8px;
-    overflow:hidden;background:#000;user-select:none;touch-action:none}
-  .stage img{display:block;width:100%;pointer-events:none}
-  .marker{position:absolute;border:3px solid var(--accent);border-radius:50%;
-    background:rgba(251,146,60,.15);transform:translate(-50%,-50%);cursor:move;
-    box-shadow:0 0 0 2px rgba(0,0,0,.25)}
-  .marker.sel{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--accent)}
-  .croprect{position:absolute;border:2px dashed #fff;background:rgba(255,255,255,.08);
-    pointer-events:none}
-  .mk-ctrl{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
-
-  /* read-only render (preview + export share these rg- classes) */
-  .rg-wrap{max-width:720px;margin:0 auto}
-  .rg-step{margin:0 0 26px}
-  .rg-step .rg-head{display:flex;gap:10px;align-items:flex-start;margin-bottom:8px}
-  .rg-num{width:26px;height:26px;border-radius:50%;background:#fb923c;color:#3a1d02;
-    font-weight:700;display:flex;align-items:center;justify-content:center;flex:0 0 auto;font-size:13px}
-  .rg-note{background:rgba(251,146,60,.12);border-left:3px solid #fb923c;padding:8px 12px;border-radius:6px}
-  .rg-step canvas{display:block;width:100%;max-width:680px;border-radius:8px;border:1px solid var(--line)}
-  dialog{border:none;border-radius:12px;padding:0;max-width:90vw}
-  .livelist{margin:6px 0 0;padding-left:24px;max-height:260px;overflow:auto}
-  .livelist li{padding:2px 0}
-  .livelist li.pending{color:var(--muted);font-style:italic;list-style:none;margin-left:-24px}
-</style>
-</head>
-<body>
-<div id="app"></div>
-
-<script>
-const Q = new URLSearchParams(location.search);
-const T = Q.get("t");
-const GID = Q.get("guide");
+// Guide page (temporary: the old editor moved as-is; view/edit mode replace it).
+"use strict";
+let GID = null;
 const DISPLAY_W = 680;
-
-const api = (path, opts) => fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(T), opts);
-const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const app = document.getElementById("app");
+
+async function guidePage(id, mode) { GID = id; document.body.classList.add("gp"); editor(); }
+async function exportGuide(gid) { toast("เร็วๆ นี้"); }
 
 // region of the image to show: explicit crop, else bbox around markers, else full
 function regionFor(step, w, h){
@@ -165,141 +80,6 @@ async function renderGuide(guide, root){
   }
 }
 
-// ---------------------------------------------------------------- home
-let POLL=null, SEQ=null, TICK=null;
-const goGuide = id => { clearInterval(POLL);
-  location.search = "?t="+encodeURIComponent(T)+"&guide="+encodeURIComponent(id); };
-// timers in a minimized window are throttled; catch up as soon as it shows again
-document.addEventListener("visibilitychange", () => { if(!document.hidden && TICK) TICK(); });
-
-// Every open StepCap page follows a recording that just finished (stopped from
-// the panel, a hotkey or the tray) to its new guide.
-async function followNewGuide(st, beforeLeave){
-  if(SEQ === null){ SEQ = st.guide_seq; return; }
-  if(st.guide_seq !== SEQ && st.last_guide){
-    SEQ = st.guide_seq;
-    if(beforeLeave) await beforeLeave();
-    goGuide(st.last_guide);
-  }
-}
-
-async function home(){
-  document.title = "StepCap";
-  app.innerHTML = `<header><h1>StepCap</h1></header>
-    <div class="wrap">
-      <div class="card" style="flex-direction:column;align-items:stretch;gap:12px">
-        <div id="hookwarn" style="display:none;color:var(--danger);font-weight:600"></div>
-        <div id="status" style="font-weight:600">พร้อมบันทึก</div>
-        <div><div class="muted" style="margin-bottom:6px">เลือกจอที่จะบันทึก</div>
-          <div id="mons"></div></div>
-        <div style="display:flex;gap:8px">
-          <button id="rec" class="primary" style="flex:1">เริ่มบันทึก</button>
-          <button id="pause" style="display:none">พัก</button>
-        </div>
-        <div id="live" style="display:none">
-          <div class="muted" id="livecount"></div>
-          <ol id="livelist" class="livelist"></ol>
-        </div>
-        <div class="muted">ปุ่มลัด: Ctrl+Alt+R เริ่ม/หยุด · Ctrl+Alt+P พัก</div>
-      </div>
-      <h2 style="font-size:15px;margin:18px 0 8px">คู่มือทั้งหมด</h2>
-      <input id="s" type="search" placeholder="ค้นหาชื่อคู่มือ...">
-      <div id="list" style="margin-top:12px"></div>
-    </div>`;
-  document.getElementById("rec").onclick = toggleRec;
-  document.getElementById("pause").onclick = () => api("/api/pause",{method:"POST"});
-  document.getElementById("s").oninput = e => drawList(e.target.value);
-  await drawList("");
-  TICK = applyStatus;
-  await applyStatus();
-  clearInterval(POLL);
-  POLL = setInterval(applyStatus, 500);
-}
-
-async function toggleRec(){
-  const st = await (await api("/api/status")).json();
-  if(st.recording){
-    const r = await (await api("/api/stop",{method:"POST"})).json();
-    if(r.guide) goGuide(r.guide); else await applyStatus();
-  } else {
-    await api("/api/start",{method:"POST"});
-    await applyStatus();
-  }
-}
-
-let liveSig = "";
-async function applyStatus(){
-  let st; try { st = await (await api("/api/status")).json(); } catch { return; }
-  const status = document.getElementById("status");
-  if(!status) return;
-  const warn = document.getElementById("hookwarn");
-  warn.style.display = st.hooks_ok ? "none" : "";
-  warn.textContent = `ตัวดักเมาส์/คีย์บอร์ดทำงานไม่ได้ (รหัส ${st.hook_error}) ปิดแล้วเปิด StepCap ใหม่`;
-  const rec = document.getElementById("rec");
-  const pause = document.getElementById("pause");
-  status.textContent = st.recording ? (st.paused ? "⏸ พักอยู่" : "● กำลังบันทึก")
-                                     : "พร้อมบันทึก";
-  status.style.color = st.recording ? (st.paused ? "#b8860b" : "#dc2626") : "";
-  rec.textContent = st.recording ? "หยุดบันทึก" : "เริ่มบันทึก";
-  pause.style.display = st.recording ? "" : "none";
-  pause.textContent = st.paused ? "ทำต่อ" : "พัก";
-  // monitor radios (disabled while recording)
-  const mons = document.getElementById("mons");
-  if(mons.dataset.n != st.monitors.length || mons.dataset.sel != st.selected
-     || mons.dataset.rec != st.recording){
-    mons.dataset.n = st.monitors.length; mons.dataset.sel = st.selected;
-    mons.dataset.rec = st.recording;
-    mons.innerHTML = "";
-    for(const m of st.monitors){
-      const b = document.createElement("button");
-      b.style.marginRight = "6px";
-      b.textContent = `จอ ${m.index+1} (${m.w}×${m.h})` + (m.primary?" หลัก":"");
-      if(m.index===st.selected){ b.classList.add("primary"); }
-      b.disabled = st.recording;
-      b.onclick = async () => { await api("/api/monitor?i="+m.index,{method:"POST"}); applyStatus(); };
-      mons.appendChild(b);
-    }
-  }
-  // live list of captured steps
-  const live = document.getElementById("live");
-  live.style.display = st.recording ? "" : "none";
-  const sig = JSON.stringify([st.steps, st.pending]);
-  if(st.recording && sig !== liveSig){
-    liveSig = sig;
-    document.getElementById("livecount").textContent = `จับได้ ${st.steps.length} ขั้นตอน`;
-    const ol = document.getElementById("livelist");
-    ol.innerHTML = st.steps.map(s => `<li>${esc(s.text)}</li>`).join("")
-      + (st.pending ? `<li class="pending">… ${esc(st.pending)}</li>` : "")
-      + (!st.steps.length && !st.pending ? `<li class="pending">ยังไม่มีขั้นตอน เริ่มคลิกได้เลย</li>` : "");
-    ol.scrollTop = ol.scrollHeight;
-  }
-  await followNewGuide(st);
-}
-
-let GUIDES=[], curFilter="";
-async function drawList(filter){
-  curFilter = filter||"";
-  GUIDES = await (await api("/api/guides")).json();
-  const list = document.getElementById("list"); if(!list) return;
-  const f = curFilter.toLowerCase();
-  const items = GUIDES.filter(g => g.title.toLowerCase().includes(f));
-  if(!items.length){ list.innerHTML = '<p class="muted">ยังไม่มีคู่มือ กดเริ่มบันทึกได้เลย</p>'; return; }
-  list.innerHTML = "";
-  for(const g of items){
-    const el = document.createElement("div"); el.className="card";
-    el.innerHTML = `<div class="t"><b>${esc(g.title)}</b><span class="muted">${g.count} ขั้นตอน</span></div>
-      <button class="open">เปิด</button><button class="danger del">ลบ</button>`;
-    el.querySelector(".open").onclick = () => { clearInterval(POLL);
-      location.search = "?t="+encodeURIComponent(T)+"&guide="+encodeURIComponent(g.id); };
-    el.querySelector(".del").onclick = async () => {
-      if(!confirm(`ลบ "${g.title}" ?\n(ย้ายไปถังขยะ กู้คืนได้)`)) return;
-      await api("/api/guide/"+encodeURIComponent(g.id)+"/delete", {method:"POST"});
-      drawList(curFilter);
-    };
-    list.appendChild(el);
-  }
-}
-
 // ---------------------------------------------------------------- editor
 let STATE=null, SAVET=null, lastColor="#fb923c", lastSize=44, sel=null, cropMode=null;
 
@@ -315,12 +95,7 @@ async function editor(){
   STATE = await (await api("/api/guide/"+encodeURIComponent(GID))).json();
   document.title = "StepCap - " + STATE.title;
   render();
-  TICK = async () => {
-    let st; try { st = await (await api("/api/status")).json(); } catch { return; }
-    await followNewGuide(st, () => SAVET ? saveNow() : null);
-  };
-  await TICK();
-  POLL = setInterval(TICK, 1000);
+  startStatusPoll(() => {}, 1000, () => SAVET ? saveNow() : null);
 }
 
 function render(){
@@ -328,7 +103,7 @@ function render(){
       <input id="title" type="text" value="${esc(STATE.title)}" style="flex:1;font-weight:600">
       <button id="prev">ดูตัวอย่าง</button>
       <button id="exp" class="primary">Export HTML</button>
-      <button onclick="location.search='?t='+encodeURIComponent(${JSON.stringify(T)})">คู่มือทั้งหมด</button>
+      <button onclick="nav({page:'home'})">คู่มือทั้งหมด</button>
     </header><div class="wrap"><div id="steps"></div>
       <button id="addnote" style="margin-top:4px">+ เพิ่มหมายเหตุ</button></div>`;
   document.getElementById("title").oninput = e => { STATE.title=e.target.value; scheduleSave(); };
@@ -508,8 +283,3 @@ async function doExport(){
   URL.revokeObjectURL(a.href);
 }
 
-// ---------------------------------------------------------------- boot
-if(GID) editor(); else home();
-</script>
-</body>
-</html>

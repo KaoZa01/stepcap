@@ -188,6 +188,15 @@ def test_duplicate_and_meta():
         assert update_meta(st, "g1", title="   ") is False
 
 
+def test_rename_keeps_app_of_old_guide():
+    # old guides have no "app" field; it comes from the "App - ..." title
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1", title="Code - 15 ต.ค. 2569 15:23")
+        assert update_meta(st, "g1", title="ชื่อใหม่") is True
+        assert list_guides(st)[0]["app"] == "Code"
+
+
 def test_save_guide_sets_id_and_updated_atomically():
     with tempfile.TemporaryDirectory() as d:
         st = Path(d)

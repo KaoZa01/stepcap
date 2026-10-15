@@ -159,6 +159,8 @@ def update_meta(storage: Path, gid: str, title: str | None = None,
     if title is not None:
         if not title.strip():
             return False
+        # old guides derive "app" from the title; keep it before the title goes
+        g["app"] = normalize(g)["app"]
         g["title"] = title.strip()
         g["updated"] = now_iso()
     if bookmarked is not None:

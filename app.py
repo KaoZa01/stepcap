@@ -81,6 +81,8 @@ def recycle(path: Path):
 # ---------------------------------------------------------------------------
 # HTTP handler (127.0.0.1 only, token-gated)
 # ---------------------------------------------------------------------------
+_UI_TYPES = {".js": "text/javascript; charset=utf-8",
+             ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
 _GUIDE_RE = re.compile(r"/api/guide/([^/]+)(?:/(delete|meta|duplicate|export))?")
 _TRASH_RE = re.compile(r"/api/trash/([^/]+)/(restore|purge)")
 
@@ -111,11 +113,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         qs = parse_qs(u.query)
+        p = u.path
+        if p.startswith("/ui/"):  # page source only; no data, so no token
+            name = unquote(p[len("/ui/"):])
+            f = HERE / "ui" / name
+            ctype = _UI_TYPES.get(f.suffix)
+            if library.safe_name(name) and ctype and f.is_file():
+                return self._send(200, f.read_bytes(), ctype)
+            return self._missing()
         if not self._auth(qs):
             return self._send(403, "forbidden", "text/plain")
-        p = u.path
         if p == "/":
-            html = (HERE / "editor.html").read_text(encoding="utf-8")
+            html = (HERE / "ui" / "index.html").read_text(encoding="utf-8")
             return self._send(200, html, "text/html; charset=utf-8")
         if p == "/api/guides":
             return self._json(library.list_guides(

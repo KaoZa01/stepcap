@@ -72,6 +72,18 @@ def post(path, body=None):
     return _req(path, body if body is not None else b"{}")
 
 
+def raw(path, token=True):
+    sep = "&" if "?" in path else "?"
+    url = f"http://127.0.0.1:{CTX['port']}{path}"
+    if token:
+        url += f"{sep}t={CTX['token']}"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as r:
+            return r.status, r.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        return e.code, ""
+
+
 def find_win(pid):
     found = []
 
@@ -186,9 +198,19 @@ def test_library_routes():
     assert get("/api/guides", token=False) == 403
 
 
+def test_ui_served():
+    code, html = raw("/")
+    assert code == 200 and 'src="ui/shell.js"' in html
+    code, js = raw("/ui/common.js", token=False)  # static source is ungated
+    assert code == 200 and "function startStatusPoll" in js
+    assert raw("/ui/..%2Fapp.py", token=False)[0] == 404
+    assert raw("/ui/nope.js", token=False)[0] == 404
+    assert raw("/", token=False)[0] == 403
+
+
 TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
-         test_library_routes]
+         test_library_routes, test_ui_served]
 
 if __name__ == "__main__":
     import traceback
