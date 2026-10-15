@@ -80,10 +80,54 @@ def test_write_guide_fields_and_icon():
         assert g2["id"] != g["id"] and g2["app_icon"] is None
 
 
+def _green_share(rect) -> float:
+    from PIL import ImageGrab
+    img = ImageGrab.grab(bbox=rect, all_screens=True).convert("RGB")
+    w, h = img.size
+    px = [img.getpixel((x, y)) for x in range(0, w, 4) for y in range(0, h, 4)]
+    return sum(1 for r, g, b in px if g > 200 and r < 60 and b < 60) / len(px)
+
+
+def test_webview_excluded_from_capture():
+    """A pywebview window (WebView2 content included) vanishes from
+    screenshots once set_capture_excluded is on. Owns the main thread."""
+    import webview
+    res = {}
+
+    def check(win):
+        try:
+            hwnd = None
+            end = time.time() + 15
+            while not hwnd and time.time() < end:
+                hwnd = recorder.find_main_window("cap-test")
+                time.sleep(0.2)
+            time.sleep(1.5)  # let WebView2 paint
+            r = wintypes.RECT()
+            recorder.user32.GetWindowRect(hwnd, ctypes.byref(r))
+            inner = (r.left + 40, r.top + 60, r.right - 40, r.bottom - 40)
+            res["before"] = _green_share(inner)
+            res["set"] = recorder.set_capture_excluded(hwnd, True)
+            time.sleep(0.5)
+            res["after"] = _green_share(inner)
+        finally:
+            win.destroy()
+
+    win = webview.create_window(
+        "cap-test", html="<body style='margin:0;background:#00ff00'></body>",
+        x=100, y=100, width=400, height=300, on_top=True)
+    webview.start(check, (win,))
+    assert res.get("set"), res
+    assert res["before"] >= 0.9, res
+    assert res["after"] <= 0.05, res
+
+
 if __name__ == "__main__":
     import traceback
     sys.stdout.reconfigure(encoding="utf-8")
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    # the webview test owns the main thread until it returns, so it runs last
+    last = test_webview_excluded_from_capture
+    fns = [v for k, v in sorted(globals().items())
+           if k.startswith("test_") and v is not last] + [last]
     failed = 0
     for fn in fns:
         try:

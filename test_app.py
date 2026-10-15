@@ -1,0 +1,214 @@
+"""End-to-end check: launches app.py on a temp storage and drives it over HTTP
+plus read-only Win32 queries. The only message sent is WM_CLOSE to the test's
+own StepCap window; no clicks or typing are synthesized. Windows only.
+Run: python test_app.py"""
+import ctypes
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from ctypes import wintypes
+from pathlib import Path
+
+import library
+import recorder as R
+
+HERE = Path(__file__).resolve().parent
+U = R.user32
+U.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
+                           wintypes.LPARAM]
+WM_CLOSE = 0x0010
+OLD_ID = "20260101-090000"
+OLD_GUIDE = {"id": OLD_ID, "title": "explorer - 1 ม.ค. 2569 09:00",
+             "created": "2026-01-01T09:00:00",
+             "steps": [{"id": "s1", "kind": "click",
+                        "text": 'คลิกปุ่ม "Start" ใน explorer',
+                        "image": None, "crop": None},
+                       {"id": "s2", "kind": "note", "text": "หมายเหตุ"}]}
+
+CTX: dict = {}
+
+
+def wait(cond, secs, step=0.2):
+    end = time.time() + secs
+    while time.time() < end:
+        v = cond()
+        if v:
+            return v
+        time.sleep(step)
+    return None
+
+
+def _req(path, body=None, token=True):
+    sep = "&" if "?" in path else "?"
+    url = f"http://127.0.0.1:{CTX['port']}{path}"
+    if token:
+        url += f"{sep}t={CTX['token']}"
+    data = None
+    if body is not None:
+        data = body if isinstance(body, bytes) else json.dumps(body).encode()
+    elif path.startswith("/api/") and token and CTX.get("post"):
+        data = b"{}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=data),
+                                    timeout=15) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def get(path, token=True):
+    CTX["post"] = False
+    return _req(path, token=token)
+
+
+def post(path, body=None):
+    CTX["post"] = True
+    return _req(path, body if body is not None else b"{}")
+
+
+def find_win(pid):
+    found = []
+
+    def _cb(hwnd, _):
+        if R.window_pid(hwnd) == pid and R.window_title(hwnd) == "StepCap":
+            found.append(hwnd)
+            return False
+        return True
+
+    U.EnumWindows(R.WNDENUMPROC(_cb), 0)
+    return found[0] if found else None
+
+
+def affinity(hwnd) -> int:
+    v = wintypes.DWORD()
+    U.GetWindowDisplayAffinity(hwnd, ctypes.byref(v))
+    return v.value
+
+
+def launch():
+    return subprocess.Popen([sys.executable, "app.py"], cwd=HERE,
+                            env={**__import__("os").environ,
+                                 "STEPCAP_STORAGE": str(CTX["storage"])},
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+
+
+def setup():
+    st = Path(tempfile.mkdtemp(prefix="stepcap-e2e-"))
+    CTX["storage"] = st
+    (st / OLD_ID).mkdir()
+    raw = json.dumps(OLD_GUIDE, ensure_ascii=False, indent=2).encode("utf-8")
+    (st / OLD_ID / "guide.json").write_bytes(raw)
+    CTX["old_bytes"] = raw
+    CTX["proc"] = launch()
+    run = wait(lambda: (st / "_run.json").exists() and json.loads(
+        (st / "_run.json").read_text(encoding="utf-8")), 20)
+    assert run, "_run.json never appeared (app did not start its server)"
+    # the venv's python.exe is a launcher; the app runs in its child process
+    CTX["port"], CTX["token"], CTX["pid"] = run["port"], run["token"], run["pid"]
+
+
+def teardown():
+    p = CTX.get("proc")
+    if p and p.poll() is None:
+        subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"],
+                       capture_output=True)
+        p.wait(10)
+    shutil.rmtree(CTX["storage"], ignore_errors=True)
+
+
+def test_old_guide_untouched():
+    g = get(f"/api/guide/{OLD_ID}")
+    assert g["settings"] == library.DEFAULT_SETTINGS
+    assert g["app"] == "explorer" and g["steps"][0]["markers"] == []
+    assert (CTX["storage"] / OLD_ID / "guide.json").read_bytes() == \
+        CTX["old_bytes"]
+
+
+def test_window_is_ours():
+    pid = CTX["pid"]
+    win = wait(lambda: (h := find_win(pid)) and U.IsWindowVisible(h) and h, 15)
+    assert win, "no visible StepCap window owned by the app process"
+    CTX["win"] = win
+    time.sleep(1.0)
+    cx, cy = R.window_center(win)
+    root = U.GetAncestor(U.WindowFromPoint(wintypes.POINT(cx, cy)), R.GA_ROOT)
+    assert R.window_pid(root) == pid, "content under the window is not ours"
+
+
+def test_close_hides_while_recording():
+    win = CTX["win"]
+    post("/api/start")
+    assert get("/api/status")["recording"] is True
+    assert affinity(win) == R.WDA_EXCLUDEFROMCAPTURE
+    U.PostMessageW(win, WM_CLOSE, 0, 0)
+    assert wait(lambda: not U.IsWindowVisible(win), 5), "X did not hide"
+    time.sleep(0.5)
+    assert CTX["proc"].poll() is None, "X quit the app"
+    assert get("/api/status")["recording"] is True
+    post("/api/stop")
+    assert get("/api/status")["recording"] is False
+    assert affinity(win) == 0
+
+
+def test_second_instance_shows_window():
+    win = CTX["win"]
+    if U.IsWindowVisible(win):  # a stray real click during the test made a guide
+        U.PostMessageW(win, WM_CLOSE, 0, 0)
+        wait(lambda: not U.IsWindowVisible(win), 5)
+    second = launch()
+    assert second.wait(15) == 0
+    assert wait(lambda: U.IsWindowVisible(win), 5), "window did not come back"
+
+
+def test_library_routes():
+    copy = post(f"/api/guide/{OLD_ID}/duplicate")["id"]
+    ids = [s["id"] for s in get("/api/guides")]
+    assert copy in ids and OLD_ID in ids
+    post(f"/api/guide/{copy}/meta", {"bookmarked": True})
+    assert [s["id"] for s in get("/api/guides?bookmarked=1")] == [copy]
+    found = {s["id"] for s in get("/api/guides?q=Start")}
+    assert {OLD_ID, copy} <= found
+    post(f"/api/guide/{OLD_ID}/delete")
+    assert OLD_ID not in [s["id"] for s in get("/api/guides")]
+    assert OLD_ID in [t["id"] for t in get("/api/trash")]
+    post(f"/api/trash/{OLD_ID}/restore")
+    assert OLD_ID in [s["id"] for s in get("/api/guides")]
+    post("/api/settings", {"view": "list"})
+    assert get("/api/settings")["view"] == "list"
+    assert get("/api/guide/_trash") == 404
+    assert get("/api/guides", token=False) == 403
+
+
+TESTS = [test_old_guide_untouched, test_window_is_ours,
+         test_close_hides_while_recording, test_second_instance_shows_window,
+         test_library_routes]
+
+if __name__ == "__main__":
+    import traceback
+    sys.stdout.reconfigure(encoding="utf-8")
+    failed = 0
+    try:
+        setup()
+        for fn in TESTS:
+            try:
+                fn()
+                print(f"ok   {fn.__name__}")
+            except Exception:
+                failed += 1
+                print(f"FAIL {fn.__name__}")
+                traceback.print_exc()
+    except Exception:
+        failed = len(TESTS)
+        print("FAIL setup")
+        traceback.print_exc()
+    finally:
+        teardown()
+    print(f"\n{len(TESTS) - failed}/{len(TESTS)} passed")
+    raise SystemExit(1 if failed else 0)
