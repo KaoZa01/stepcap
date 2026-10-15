@@ -1,0 +1,226 @@
+"""Self-check for library.py (guides on disk). Run: python test_library.py"""
+import json
+import shutil
+import tempfile
+import time
+from datetime import datetime
+from pathlib import Path
+
+from library import (DEFAULT_APP_SETTINGS, DEFAULT_SETTINGS, duplicate_guide,
+                     empty_trash, list_guides, list_trash, load_settings,
+                     new_id, normalize, purge_guide, rel_time, restore_guide,
+                     save_guide, save_settings, step_count, trash_guide,
+                     update_meta)
+
+
+def _seed(storage: Path, gid: str, title="T", created="2026-10-01T10:00:00",
+          steps=None, **fields) -> Path:
+    folder = storage / gid
+    folder.mkdir(parents=True)
+    g = {"id": gid, "title": title, "created": created,
+         "steps": steps if steps is not None else
+         [{"id": "s1", "kind": "click", "text": "คลิก"}], **fields}
+    (folder / "guide.json").write_text(json.dumps(g, ensure_ascii=False),
+                                       encoding="utf-8")
+    return folder
+
+
+def _load(storage: Path, *parts) -> dict:
+    return json.loads(storage.joinpath(*parts, "guide.json")
+                      .read_text(encoding="utf-8"))
+
+
+def _fake_recycle(calls):
+    def recycle(path):
+        calls.append(path)
+        shutil.rmtree(path)
+    return recycle
+
+
+def test_rel_time():
+    now = datetime(2026, 10, 15, 12, 0, 0)
+    assert rel_time("2026-10-15T11:59:30", now) == "เมื่อสักครู่"
+    assert rel_time("2026-10-15T11:55:00", now) == "5 นาทีที่แล้ว"
+    assert rel_time("2026-10-15T09:00:00", now) == "3 ชั่วโมงที่แล้ว"
+    assert rel_time("2026-10-13T12:00:00", now) == "2 วันที่แล้ว"
+    assert rel_time("2026-05-15T12:00:00", now) == "5 เดือนที่แล้ว"
+    assert rel_time("2024-10-15T12:00:00", now) == "2 ปีที่แล้ว"
+    assert rel_time("2026-10-15T12:00:05", now) == "เมื่อสักครู่"  # clock skew
+    assert rel_time("", now) == "" and rel_time("garbage", now) == ""
+
+
+def test_normalize_minimal_old_guide():
+    old = {"id": "20261015-153012", "title": "explorer - 15 ต.ค. 2569 15:30",
+           "steps": [{"id": "a", "kind": "click", "text": "x"},
+                     {"id": "b", "kind": "note", "text": "n"}]}
+    before = json.dumps(old, sort_keys=True)
+    g = normalize(old)
+    assert json.dumps(old, sort_keys=True) == before  # input not mutated
+    assert g["created"] == "" and g["updated"] == "" and g["bookmarked"] is False
+    assert g["app"] == "explorer" and g["app_icon"] is None
+    assert g["settings"] == DEFAULT_SETTINGS
+    s0 = g["steps"][0]
+    assert s0["markers"] == [] and s0["crop"] is None and s0["image"] is None
+    assert normalize(g) == g  # idempotent
+    assert normalize({"id": "x", "title": "no dash", "steps": []})["app"] == ""
+    custom = normalize({**old, "settings": {"toc": True}})["settings"]
+    assert custom["toc"] is True and custom["click_color"] == "#FB923C"
+
+
+def test_step_count_ignores_notes():
+    assert step_count({"steps": [{"kind": "click"}, {"kind": "note"},
+                                 {"kind": "type"}]}) == 2
+
+
+def test_corrupt_guide_skipped():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "a")
+        (st / "b").mkdir()
+        (st / "b" / "guide.json").write_text('{"id": "b", "ti', encoding="utf-8")
+        (st / "_tmp").mkdir()
+        _seed(st, "_trash")  # a system folder that happens to hold a guide.json
+        (st / "stray.txt").write_text("x", encoding="utf-8")
+        assert [s["id"] for s in list_guides(st)] == ["a"]
+        assert (st / "b" / "guide.json").exists()
+
+
+def test_list_search_and_order():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "20261001-100000", title="Notepad - เก่า",
+              created="2026-10-01T10:00:00",
+              steps=[{"id": "s1", "kind": "click", "text": "บันทึกไฟล์"},
+                     {"id": "s2", "kind": "note", "text": "หมายเหตุ"}])
+        _seed(st, "20261010-100000", title="Excel - ใหม่",
+              created="2026-10-10T10:00:00", bookmarked=True)
+        assert [s["id"] for s in list_guides(st)] == \
+            ["20261010-100000", "20261001-100000"]  # newest created first
+        assert [s["id"] for s in list_guides(st, q="บันทึกไฟล์")] == \
+            ["20261001-100000"]  # step text
+        assert [s["id"] for s in list_guides(st, q="  EXCEL ")] == \
+            ["20261010-100000"]  # casefold title
+        assert [s["id"] for s in list_guides(st, bookmarked_only=True)] == \
+            ["20261010-100000"]
+        s = list_guides(st)[1]
+        assert s["count"] == 1 and s["app"] == "Notepad"
+        assert s["icon"] is False and s["ago"] != ""
+        assert set(s) == {"id", "title", "created", "updated", "count", "app",
+                          "icon", "bookmarked", "ago"}
+
+
+def test_trash_restore_purge():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1", title="คู่มือหนึ่ง")
+        assert trash_guide(st, "g1") is True
+        assert not (st / "g1").exists()
+        assert _load(st, "_trash", "g1")["deleted"]
+        assert list_guides(st) == [] and list_guides(st, q="คู่มือหนึ่ง") == []
+        assert [t["id"] for t in list_trash(st)] == ["g1"]
+        assert restore_guide(st, "g1") is True
+        assert "deleted" not in _load(st, "g1")
+        assert [s["id"] for s in list_guides(st)] == ["g1"]
+
+        calls = []
+        trash_guide(st, "g1")
+        assert purge_guide(st, "g1", recycle=_fake_recycle(calls)) is True
+        assert calls == [st / "_trash" / "g1"]
+
+        _seed(st, "g2")
+        _seed(st, "g3")
+        trash_guide(st, "g2")
+        trash_guide(st, "g3")
+        calls.clear()
+        assert empty_trash(st, recycle=_fake_recycle(calls)) == 2 and len(calls) == 2
+        assert list_trash(st) == []
+
+        assert trash_guide(st, "_trash") is False
+        assert trash_guide(st, "../x") is False
+        assert trash_guide(st, "missing") is False
+
+
+def test_restore_refuses_taken_id():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1", title="old")
+        trash_guide(st, "g1")
+        _seed(st, "g1", title="new")
+        assert restore_guide(st, "g1") is False
+        assert (st / "g1").exists() and (st / "_trash" / "g1").exists()
+        assert _load(st, "g1")["title"] == "new"
+
+
+def test_new_id_unique():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        t = time.mktime((2026, 10, 15, 12, 0, 0, 0, 0, -1))
+        assert new_id(st, t) == "20261015-120000"
+        (st / "20261015-120000").mkdir()
+        (st / "_trash" / "20261015-120000-2").mkdir(parents=True)
+        assert new_id(st, t) == "20261015-120000-3"
+
+
+def test_duplicate_and_meta():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        folder = _seed(st, "g1", title="A", bookmarked=True,
+                       steps=[{"id": "s1", "kind": "click", "text": "x",
+                               "image": "s1.png"}])
+        (folder / "s1.png").write_bytes(b"png")
+        new = duplicate_guide(st, "g1")
+        assert new and new != "g1" and (st / new / "s1.png").exists()
+        c = _load(st, new)
+        assert c["title"] == "A (สำเนา)" and c["id"] == new
+        assert c["bookmarked"] is False
+        assert c["created"] == c["updated"] and len(c["created"]) == 19
+        new2 = duplicate_guide(st, new)
+        assert new2 not in ("g1", new)
+        assert _load(st, new2)["title"] == "A (สำเนา) (สำเนา)"
+
+        before = _load(st, "g1").get("updated")
+        assert update_meta(st, "g1", bookmarked=False) is True
+        assert _load(st, "g1")["bookmarked"] is False
+        assert _load(st, "g1").get("updated") == before
+        assert update_meta(st, "g1", title="B") is True
+        g = _load(st, "g1")
+        assert g["title"] == "B" and g.get("updated") != before
+        assert update_meta(st, "g1", title="   ") is False
+
+
+def test_save_guide_sets_id_and_updated_atomically():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1")
+        assert save_guide(st, "g1", {"id": "evil", "title": "T", "steps": []})
+        g = _load(st, "g1")
+        assert g["id"] == "g1" and len(g["updated"]) == 19
+        assert not list((st / "g1").glob("*.tmp"))
+        assert save_guide(st, "g1", {"steps": "nope"}) is False
+        assert save_guide(st, "missing", {"steps": []}) is False
+
+
+def test_settings_roundtrip():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        assert load_settings(st) == DEFAULT_APP_SETTINGS  # no file yet
+        save_settings(st, view="list", bogus=1)
+        assert load_settings(st) == {"monitor": None, "view": "list"}
+        (st / "settings.json").write_text("{bad", encoding="utf-8")
+        assert load_settings(st) == DEFAULT_APP_SETTINGS  # corrupt -> defaults
+
+
+if __name__ == "__main__":
+    import traceback
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    failed = 0
+    for fn in fns:
+        try:
+            fn()
+            print(f"ok   {fn.__name__}")
+        except Exception:
+            failed += 1
+            print(f"FAIL {fn.__name__}")
+            traceback.print_exc()
+    print(f"\n{len(fns) - failed}/{len(fns)} passed")
+    raise SystemExit(1 if failed else 0)
