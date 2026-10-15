@@ -120,6 +120,17 @@ def save_dialog(pid):
     return found[0] if found else None
 
 
+def all_children(hwnd):
+    out = []
+
+    def _cb(h, _):
+        out.append(h)
+        return True
+
+    U.EnumChildWindows(hwnd, R.WNDENUMPROC(_cb), 0)
+    return out
+
+
 def child_edits(hwnd):
     out = []
 
@@ -197,10 +208,16 @@ def test_window_is_ours():
     win = wait(lambda: (h := find_win(pid)) and U.IsWindowVisible(h) and h, 15)
     assert win, "no visible StepCap window owned by the app process"
     CTX["win"] = win
-    time.sleep(1.0)
-    cx, cy = R.window_center(win)
-    root = U.GetAncestor(U.WindowFromPoint(wintypes.POINT(cx, cy)), R.GA_ROOT)
-    assert R.window_pid(root) == pid, "content under the window is not ours"
+    # The recorder skips a click when GA_ROOT of the window under the cursor
+    # belongs to this pid. Check every descendant (WebView2's children live in
+    # msedgewebview2 processes) instead of hit-testing, which depends on z-order.
+    kids = wait(lambda: [h for h in all_children(win)
+                         if R.window_pid(h) != pid], 15)
+    assert kids, "no cross-process WebView2 child found under the window"
+    for h in all_children(win):
+        root = U.GetAncestor(h, R.GA_ROOT)
+        assert root == win and R.window_pid(root) == pid, class_name(h)
+    time.sleep(1.0)  # pywebview gates hide() on its "shown" event; let it settle
 
 
 def test_close_hides_while_recording():
