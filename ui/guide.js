@@ -5,8 +5,10 @@
 let GID = null, STATE = null;
 const app = document.getElementById("app");
 
-// One step's screenshot: the crop (or the whole image), never zoomed; markers on
-// top. maxW (optional) caps the canvas width, e.g. for grid thumbnails.
+// One step's screenshot: the crop (or the whole image), never zoomed, with its
+// layers on top in this order: redactions -> annotations -> click markers.
+// Layer coordinates are full-image pixels. maxW (optional) caps the canvas
+// width, e.g. for grid thumbnails. Self-contained: exports embed its source.
 function drawStepCanvas(canvas, img, step, maxW) {
   const W = img.naturalWidth, H = img.naturalHeight;
   const c0 = step.crop || {x: 0, y: 0, w: W, h: H};
@@ -16,14 +18,54 @@ function drawStepCanvas(canvas, img, step, maxW) {
   canvas.width = Math.max(1, Math.round(r.w * s));
   canvas.height = Math.max(1, Math.round(r.h * s));
   const c = canvas.getContext("2d");
-  c.drawImage(img, r.x, r.y, r.w, r.h, 0, 0, canvas.width, canvas.height);
+  c.setTransform(s, 0, 0, s, -r.x * s, -r.y * s);  // draw in image pixels; the canvas edge crops
+  c.drawImage(img, 0, 0);
+  for (const d of step.redactions || []) {
+    c.save();
+    c.beginPath(); c.rect(d.x, d.y, d.w, d.h); c.clip();
+    if (d.type === "blur") {
+      c.filter = "blur(" + Math.max(16, Math.round(Math.min(d.w, d.h) / 4)) + "px)";
+      c.drawImage(img, 0, 0);
+    } else {
+      c.fillStyle = "#000"; c.fillRect(d.x, d.y, d.w, d.h);
+    }
+    c.restore();
+  }
+  for (const a of step.annotations || []) {
+    c.save();
+    c.strokeStyle = c.fillStyle = a.color || "#EF4444";
+    c.lineWidth = a.width || 8; c.lineJoin = "round"; c.lineCap = "round";
+    if (a.type === "box") {
+      c.strokeRect(a.x, a.y, a.w, a.h);
+    } else if (a.type === "arrow") {
+      const ang = Math.atan2(a.y2 - a.y1, a.x2 - a.x1), L = Math.max(14, (a.width || 8) * 3.5);
+      const sp = 28 * Math.PI / 180;
+      c.beginPath(); c.moveTo(a.x1, a.y1);
+      c.lineTo(a.x2 - L * 0.7 * Math.cos(ang), a.y2 - L * 0.7 * Math.sin(ang)); c.stroke();
+      c.beginPath(); c.moveTo(a.x2, a.y2);
+      c.lineTo(a.x2 - L * Math.cos(ang - sp), a.y2 - L * Math.sin(ang - sp));
+      c.lineTo(a.x2 - L * Math.cos(ang + sp), a.y2 - L * Math.sin(ang + sp));
+      c.closePath(); c.fill();
+    } else if (a.type === "text") {
+      const size = a.size || 40;
+      c.font = "bold " + size + 'px "Leelawadee UI","Segoe UI",sans-serif';
+      c.textBaseline = "top";
+      c.lineWidth = size * 0.18; c.strokeStyle = "#fff";  // white edge: readable on any background
+      c.strokeText(a.text || "", a.x, a.y);
+      c.fillText(a.text || "", a.x, a.y);
+    }
+    c.restore();
+  }
   const k = Math.max(1, r.w / 960);  // keep rings visible once scaled down
   for (const m of step.markers || []) {
     const rad = m.size / 2;
-    c.beginPath(); c.arc((m.x - r.x) * s, (m.y - r.y) * s, rad * s, 0, 2 * Math.PI);
+    c.beginPath();
+    if (m.shape === "rect") c.roundRect(m.x - rad, m.y - rad, m.size, m.size, m.size * 0.2);
+    else c.arc(m.x, m.y, rad, 0, 2 * Math.PI);
     c.fillStyle = m.color + "26"; c.fill();
-    c.lineWidth = Math.max(3 * k, rad * 0.14) * s; c.strokeStyle = m.color; c.stroke();
+    c.lineWidth = Math.max(3 * k, rad * 0.14); c.strokeStyle = m.color; c.stroke();
   }
+  c.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 // Read-only render of a whole guide into root. Each step's image comes from
@@ -57,7 +99,11 @@ async function renderGuide(guide, root) {
       div.innerHTML = '<div class="rg-note">' + E(step.text) + "</div>";
     } else {
       div.innerHTML = '<div class="rg-head"><div class="rg-num">' + (++n) + "</div><div>" + E(step.text) + "</div></div>";
-      if (step._src) {
+      if (step._src && (step._gif || /\.gif$/i.test(step.image || ""))) {
+        const gif = document.createElement("img");  // animated, shown as-is
+        gif.className = "rg-gif"; gif.alt = ""; gif.src = step._src;
+        div.appendChild(gif);
+      } else if (step._src) {
         const cv = document.createElement("canvas");
         div.appendChild(cv);
         const img = new Image();
@@ -101,26 +147,60 @@ const asDataUrl = blob => new Promise(res => {
   const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob);
 });
 
-// One self-contained HTML file that looks like view mode; saved via Save As.
-async function exportGuide(gid) {
+const isGif = s => /\.gif$/i.test(s.image || "");
+
+// The finished picture of one step, as export and download ship it: crop and
+// every layer drawn into the pixels, so hidden parts are really gone.
+function renderStepPng(step, gid) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement("canvas");
+      drawStepCanvas(cv, img, step);
+      cv.toBlob(b => b ? resolve(b) : reject(new Error("toBlob failed")), "image/png");
+    };
+    img.onerror = () => reject(new Error("image failed to load: " + step.image));
+    img.src = imgUrl(gid, step.image);
+  });
+}
+
+// One self-contained HTML file that looks like view mode. Every non-GIF image
+// is flattened first, so no original screenshot ever leaves the machine.
+async function buildExportHtml(gid) {
   const g = await getJSON("/api/guide/" + encodeURIComponent(gid));
   const steps = [];
   for (const s of g.steps) {
     const c = {...s};
-    if (s.image) c._src = await asDataUrl(await (await api("/img/" + encodeURIComponent(gid) +
-      "/" + encodeURIComponent(s.image))).blob());
+    try {
+      if (s.image && isGif(s)) {
+        c._src = await asDataUrl(await (await api("/img/" + encodeURIComponent(gid) +
+          "/" + encodeURIComponent(s.image))).blob());
+        c._gif = true;
+      } else if (s.image) {
+        c._src = await asDataUrl(await renderStepPng(s, gid));
+        Object.assign(c, {crop: null, markers: [], annotations: [], redactions: []});
+      }
+    } catch {  // an unreadable image is exported without its picture
+      delete c._src;
+      Object.assign(c, {crop: null, markers: [], annotations: [], redactions: []});
+    }
     delete c.image;
     steps.push(c);
   }
   // "<" escaped so step text such as "</script>" cannot end the script early
   const json = JSON.stringify({...g, steps}).replace(/</g, "\\u003c");
   const css = document.getElementById("rg-css").textContent;
-  const html = `<!doctype html><html lang="th"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(g.title)}</title>
 <style>body{margin:0;padding:32px 24px;background:#fff}${css}</style></head>
 <body><div id="root"></div><script>const guide=${json};
 ${drawStepCanvas}
 (${renderGuide})(guide, document.getElementById("root"));<\/script></body></html>`;
+}
+
+// Saved via Save As.
+async function exportGuide(gid) {
+  const html = await buildExportHtml(gid);
   const r = await (await api("/api/guide/" + encodeURIComponent(gid) + "/export",
     {method: "POST", headers: {"Content-Type": "text/html; charset=utf-8"}, body: html})).json();
   if (r.saved) toast("บันทึกไฟล์แล้ว");
