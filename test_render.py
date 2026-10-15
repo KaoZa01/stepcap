@@ -62,7 +62,18 @@ def seed(st: Path):
               "color": BLUE, "width": 8}],
          "redactions": [{"type": "black", "x": 20, "y": 20, "w": 60, "h": 40},
                         {"type": "blur", "x": 200, "y": 100, "w": 80, "h": 60}]},
+        {"id": "a2", "kind": "click", "text": "second", "image": "n.png",
+         "crop": None,
+         "markers": [{"x": 40, "y": 40, "color": ORANGE, "size": 44},
+                     {"x": 90, "y": 90, "color": ORANGE, "size": 44}]},
     ])
+    _guide(st, "broken", [
+        {"id": "b1", "kind": "click", "text": "missing", "image": "missing.png",
+         "crop": None, "markers": []},
+        {"id": "b2", "kind": "click", "text": "junk", "image": "bad.png",
+         "crop": None, "markers": []},
+    ])
+    (st / "broken" / "bad.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"junk" * 50)
     _guide(st, "cropx", [
         {"id": "c1", "kind": "click", "text": "crop step", "image": "n.png",
          "crop": {"x": 100, "y": 50, "w": 150, "h": 100}, "markers": [],
@@ -183,8 +194,56 @@ def test_old_guide_exports_flattened():
     assert data["steps"][0]["markers"] == []
 
 
+def _png_js(name: str) -> str:
+    small = BytesIO()
+    Image.new("RGB", (4, 4), (0, 200, 0)).save(small, "PNG")
+    b64 = base64.b64encode(small.getvalue()).decode()
+    return (f"const u = Uint8Array.from(atob('{b64}'), c => c.charCodeAt(0));"
+            f"const file = new File([u], '{name}', {{type: 'image/png'}});")
+
+
+def test_click_style_all_markers():
+    page("guide=noise&mode=edit")
+    js("setClickStyle({shape: 'rect', size: 70});")
+    ms = js("return STATE.steps.flatMap(s => s.markers);")
+    assert len(ms) == 3 and all(m["shape"] == "rect" and m["size"] == 70 for m in ms)
+    assert all(m["color"] == ORANGE for m in ms)  # only the patched keys change
+    assert js("return STATE.settings.click_shape + STATE.settings.click_size;") == "rect70"
+    assert {a["color"] for a in js("return STATE.steps[0].annotations;")} == {RED, BLUE}
+
+
+def test_text_paste_ignored():
+    n = js("return STATE.steps.length;")
+    js("const dt = new DataTransfer(); dt.setData('text/plain', 'hi');"
+       "document.body.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true}));")
+    time.sleep(1.5)
+    assert js("return STATE.steps.length;") == n
+
+
+def test_image_paste_adds_step():
+    n = js("return STATE.steps.length;")
+    js(_png_js("p.png") + "const dt = new DataTransfer(); dt.items.add(file);"
+       "document.body.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true}));")
+    last = js("for (let i = 0; i < 60 && STATE.steps.length === " + str(n) + "; i++)"
+              "  await new Promise(r => setTimeout(r, 50));"
+              "return STATE.steps.at(-1);")
+    assert last["kind"] == "image" and last["image"].endswith(".png"), last
+    assert (CTX["storage"] / "noise" / last["image"]).is_file()
+
+
+def test_broken_image_tolerated():
+    page("guide=broken&mode=edit")
+    time.sleep(1)
+    assert js("return document.querySelectorAll('.step').length;") == 2
+    assert js("return document.querySelectorAll('.imgfail').length;") == 2
+    js("STATE.steps.splice(0, 1); renderSteps();")
+    assert js("return document.querySelectorAll('.step').length;") == 1
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
-         test_bake_redaction_across_crop, test_old_guide_exports_flattened]
+         test_bake_redaction_across_crop, test_old_guide_exports_flattened,
+         test_click_style_all_markers, test_text_paste_ignored,
+         test_image_paste_adds_step, test_broken_image_tolerated]
 
 
 def run_all(holder):

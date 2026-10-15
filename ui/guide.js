@@ -208,12 +208,18 @@ async function exportGuide(gid) {
 
 // ---------------------------------------------------------------- edit mode
 const KIND_TH = {click: "คลิก", rightclick: "คลิกขวา", doubleclick: "ดับเบิลคลิก", type: "พิมพ์",
-  password: "รหัสผ่าน", shortcut: "ปุ่มลัด", note: "หมายเหตุ"};
+  password: "รหัสผ่าน", shortcut: "ปุ่มลัด", note: "หมายเหตุ", image: "ภาพ"};
 const SWATCHES = ["#FB923C", "#EF4444", "#EAB308", "#22C55E", "#3B82F6", "#A855F7"];
 const DOC_SWITCHES = [["toc", "สารบัญ"], ["step_count", "จำนวนขั้นตอน"],
   ["created", "วันที่สร้าง"], ["updated", "วันที่แก้ไขล่าสุด"]];
-let SAVET = null, lastSize = 44, sel = null;
-const clickColor = () => (STATE.settings.click_color || "#FB923C").toUpperCase();
+const UPLOAD_FAILED = "ไฟล์นี้ใช้ไม่ได้ รองรับ PNG, JPG, GIF ขนาดไม่เกิน 25 MB";
+let SAVET = null;
+// The guide's click-target style; new markers use it.
+const clickStyle = () => ({
+  color: (STATE.settings.click_color || "#FB923C").toUpperCase(),
+  shape: STATE.settings.click_shape || "circle",
+  size: +STATE.settings.click_size || 44,
+});
 const newStepId = () => "s" + Math.random().toString(16).slice(2, 10);
 
 let SAVE_FAILING = false;
@@ -245,7 +251,7 @@ function editPage() {
     </header><div class="gbody edit"><div class="ewrap" id="ewrap"></div></div>
     <div class="etb">
       <button type="button" class="tb off" aria-disabled="true" data-tip="เพิ่มลงหน้า · เร็วๆ นี้">${ICON.page}</button>
-      <button type="button" class="tb" data-pop="color" data-tip="สีวงจุดคลิก">${ICON.brush}</button>
+      <button type="button" class="tb" data-pop="click" data-tip="จุดคลิก (สี รูปทรง ขนาด)">${ICON.brush}</button>
       <button type="button" class="tb" data-pop="doc" data-tip="ตั้งค่าเอกสาร">${ICON.sliders}</button>
       <div class="tbpop" id="tbpop" hidden></div>
     </div>`;
@@ -262,6 +268,16 @@ function editPage() {
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") document.getElementById("tbpop").hidden = true;
   });
+  // Ctrl+V of an image (not while typing, not inside the image editor) adds an image step
+  document.addEventListener("paste", e => {
+    if (document.querySelector(".ied")) return;
+    if (e.target instanceof Element && e.target.closest("input, textarea")) return;
+    const item = [...(e.clipboardData?.items || [])]
+      .find(i => i.kind === "file" && i.type.startsWith("image/"));
+    if (!item) return;
+    e.preventDefault();
+    addImageStep(item.getAsFile());
+  });
   renderSteps();
   startStatusPoll(() => {}, 1000, flush);
 }
@@ -272,37 +288,51 @@ function toggleToolPop(kind, btn) {
   if (!pop.hidden && pop.dataset.kind === kind) { pop.hidden = true; return; }
   pop.dataset.kind = kind;
   pop.style.top = btn.offsetTop + "px";
-  (kind === "color" ? renderColorPop : renderDocPop)(pop);
+  (kind === "click" ? renderClickPop : renderDocPop)(pop);
   pop.hidden = false;
 }
 
-function renderColorPop(pop) {
-  const cur = clickColor();
-  pop.innerHTML = `<div class="pop-h">สีวงจุดคลิก</div>
+function renderClickPop(pop) {
+  const cur = clickStyle();
+  pop.innerHTML = `<div class="pop-h">จุดคลิก</div>
+    <div class="muted small">สี</div>
     <div class="sw">${SWATCHES.map(c =>
-      `<button type="button" class="swatch${c === cur ? " on" : ""}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join("")}</div>
-    <div class="custom"><input type="color" id="cc" value="${cur.toLowerCase()}" title="เลือกสีเอง">
-      <input type="text" id="hex" class="dlg-in" value="${cur}" maxlength="7" spellcheck="false"></div>
+      `<button type="button" class="swatch${c === cur.color ? " on" : ""}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join("")}</div>
+    <div class="custom"><input type="color" id="cc" value="${cur.color.toLowerCase()}" title="เลือกสีเอง">
+      <input type="text" id="hex" class="dlg-in" value="${cur.color}" maxlength="7" spellcheck="false"></div>
+    <div class="muted small">รูปทรง</div>
+    <div class="seg wide"><button type="button" data-shape="circle" class="${cur.shape === "circle" ? "on" : ""}">วงกลม</button>
+      <button type="button" data-shape="rect" class="${cur.shape === "rect" ? "on" : ""}">สี่เหลี่ยม</button></div>
+    <div class="muted small" style="margin-top:10px">ขนาด <b id="szl">${cur.size}</b></div>
+    <input type="range" id="csz" min="24" max="96" value="${cur.size}" class="full">
     <div class="muted small">เปลี่ยนทุกวงในคู่มือนี้ และวงที่เพิ่มใหม่</div>`;
-  pop.querySelectorAll(".swatch").forEach(b => b.onclick = () => setClickColor(b.dataset.c));
-  pop.querySelector("#cc").onchange = e => setClickColor(e.target.value);
+  pop.querySelectorAll(".swatch").forEach(b => b.onclick = () => setClickStyle({color: b.dataset.c}));
+  pop.querySelector("#cc").onchange = e => setClickStyle({color: e.target.value});
   pop.querySelector("#hex").oninput = e => {
-    if (/^#[0-9a-f]{6}$/i.test(e.target.value)) setClickColor(e.target.value);
+    if (/^#[0-9a-f]{6}$/i.test(e.target.value)) setClickStyle({color: e.target.value});
   };
+  pop.querySelectorAll("[data-shape]").forEach(b => b.onclick = () => setClickStyle({shape: b.dataset.shape}));
+  const sz = pop.querySelector("#csz");
+  sz.oninput = () => { pop.querySelector("#szl").textContent = sz.value; };
+  sz.onchange = () => setClickStyle({size: +sz.value});
 }
 
-// One color for every click marker of the guide; new markers use it too.
-function setClickColor(hex) {
-  const c = hex.toUpperCase();
-  STATE.settings.click_color = c;
-  for (const s of STATE.steps) for (const m of s.markers || []) m.color = c;
+// The guide-wide click style: writes only the given keys, onto every marker of
+// every step; arrows, boxes and text keep their own colours.
+function setClickStyle(patch) {
+  const S = STATE.settings, p = {};
+  if (patch.color) p.color = S.click_color = patch.color.toUpperCase();
+  if (patch.shape) p.shape = S.click_shape = patch.shape;
+  if (patch.size) p.size = S.click_size = +patch.size;
+  for (const s of STATE.steps) for (const m of s.markers || []) Object.assign(m, p);
   renderSteps(); scheduleSave();
   const pop = document.getElementById("tbpop");
-  if (pop.hidden || pop.dataset.kind !== "color") return;
-  pop.querySelectorAll(".swatch").forEach(b => b.classList.toggle("on", b.dataset.c === c));
-  const cc = pop.querySelector("#cc"), hx = pop.querySelector("#hex");
-  if (document.activeElement !== cc) cc.value = c.toLowerCase();
-  if (document.activeElement !== hx) hx.value = c;
+  if (pop.hidden || pop.dataset.kind !== "click") return;
+  if (document.activeElement?.id === "hex") {  // keep the caret while typing a code
+    pop.querySelectorAll(".swatch").forEach(b => b.classList.toggle("on", b.dataset.c === S.click_color));
+  } else {
+    renderClickPop(pop);
+  }
 }
 
 function renderDocPop(pop) {
@@ -321,6 +351,46 @@ function renderDocPop(pop) {
   });
 }
 
+// ---- images: upload, add as a step, download one step's picture
+async function uploadImage(blob) {
+  try {
+    const r = await api("/api/guide/" + encodeURIComponent(GID) + "/image", {method: "POST", body: blob});
+    if (r.ok) return (await r.json()).image;
+  } catch { /* too large: the server closes the connection */ }
+  toast(UPLOAD_FAILED);
+  return null;
+}
+
+async function addImageStep(blob) {
+  const image = await uploadImage(blob);
+  if (!image) return;
+  const step = {id: newStepId(), kind: "image", text: "", image,
+    crop: null, markers: [], annotations: [], redactions: []};
+  STATE.steps.push(step);
+  renderSteps(); scheduleSave();
+  const input = document.querySelector("#edit-" + step.id + " .stext");
+  if (input) { input.scrollIntoView({block: "center"}); input.focus(); }
+}
+
+async function downloadStepImage(step) {
+  let n = 0;
+  for (const s of STATE.steps) { if (s.kind !== "note") n++; if (s === step) break; }
+  let body;
+  try {
+    body = isGif(step)
+      ? await (await api("/img/" + encodeURIComponent(GID) + "/" + encodeURIComponent(step.image))).blob()
+      : await renderStepPng(step, GID);
+  } catch {
+    return toast("เปิดภาพนี้ไม่ได้");
+  }
+  const r = await (await api("/api/guide/" + encodeURIComponent(GID) + "/download?n=" + n,
+    {method: "POST", body})).json();
+  if (r.saved) toast("บันทึกภาพแล้ว");
+}
+
+// Until the full-window editor (ui/editor.js) exists.
+function openImageEditor(stepId) { toast("เร็วๆ นี้"); }
+
 // ---- steps (linear cards or grid thumbnails)
 function renderSteps() {
   const host = document.getElementById("ewrap");
@@ -335,13 +405,20 @@ function renderSteps() {
   } else {
     STATE.steps.forEach((s, i) => host.appendChild(stepCard(s, i, nums[i])));
   }
-  const add = document.createElement("button");
-  add.type = "button"; add.className = "btn"; add.textContent = "+ เพิ่มหมายเหตุ";
-  add.onclick = () => {
-    STATE.steps.push({id: newStepId(), kind: "note", text: "หมายเหตุ...", image: null, crop: null, markers: []});
+  const bar = document.createElement("div");
+  bar.className = "addbar";
+  bar.innerHTML = `<button type="button" class="btn addnote">+ เพิ่มหมายเหตุ</button>
+    <button type="button" class="btn addimg">+ เพิ่มภาพ</button>
+    <input type="file" accept="image/png,image/jpeg,image/gif" hidden>`;
+  bar.querySelector(".addnote").onclick = () => {
+    STATE.steps.push({id: newStepId(), kind: "note", text: "หมายเหตุ...", image: null, crop: null,
+      markers: [], annotations: [], redactions: []});
     renderSteps(); scheduleSave();
   };
-  host.appendChild(add);
+  const file = bar.querySelector("input[type=file]");
+  bar.querySelector(".addimg").onclick = () => file.click();
+  file.onchange = () => { if (file.files[0]) addImageStep(file.files[0]); };
+  host.appendChild(bar);
 }
 
 function dropTarget(el, i) {
@@ -372,7 +449,8 @@ function stepCard(step, i, num) {
   el.id = "edit-" + step.id;
   el.innerHTML = `<div class="row1">${stepBadge(num)}
       <div class="txt">${num ? `<div class="kindtag">${esc(KIND_TH[step.kind] || step.kind)}</div>` : ""}
-        <input type="text" class="stext" value="${esc(step.text)}"></div>
+        <input type="text" class="stext" value="${esc(step.text)}"
+          ${step.kind === "image" ? 'placeholder="คำอธิบายภาพ"' : ""}></div>
       <button type="button" class="btn danger del">ลบ</button></div>`;
   el.querySelector(".stext").oninput = e => { step.text = e.target.value; scheduleSave(); };
   el.querySelector(".del").onclick = async () => {
@@ -380,13 +458,40 @@ function stepCard(step, i, num) {
     STATE.steps.splice(STATE.steps.indexOf(step), 1);
     renderSteps(); scheduleSave();
   };
-  // drag only from the badge, so marker drags and text selection stay free
+  // drag only from the badge, so text selection stays free
   const handle = el.querySelector(".drag");
   handle.onpointerdown = () => { el.draggable = true; };
   el.addEventListener("dragend", () => { el.draggable = false; });
   dragSource(el, i); dropTarget(el, i);
-  if (step.image) el.appendChild(imageEditor(step));
+  if (step.image) el.appendChild(stepPreview(step));
   return el;
+}
+
+// The step's finished picture plus its image buttons; a picture that cannot be
+// read shows a notice instead, and the step stays editable and deletable.
+function stepPreview(step) {
+  const box = document.createElement("div");
+  box.innerHTML = `<div class="etools">
+      <button type="button" class="btn ed">${ICON.edit} แก้ไขภาพ</button>
+      <button type="button" class="btn dl">${ICON.export} ดาวน์โหลดภาพ</button></div>
+    <div class="eprev"></div>`;
+  const tools = box.querySelector(".etools"), prev = box.querySelector(".eprev");
+  const fail = () => { tools.hidden = true; prev.innerHTML = '<div class="imgfail">เปิดภาพนี้ไม่ได้</div>'; };
+  if (isGif(step)) {
+    const im = document.createElement("img");
+    im.alt = ""; im.onerror = fail; im.src = imgUrl(GID, step.image);
+    prev.appendChild(im);
+  } else {
+    const cv = document.createElement("canvas");
+    prev.appendChild(cv);
+    const img = new Image();
+    img.onload = () => drawStepCanvas(cv, img, step, 860);
+    img.onerror = fail;
+    img.src = imgUrl(GID, step.image);
+  }
+  tools.querySelector(".ed").onclick = () => openImageEditor(step.id);
+  tools.querySelector(".dl").onclick = () => downloadStepImage(step);
+  return box;
 }
 
 function gridCard(step, i, num) {
@@ -394,12 +499,23 @@ function gridCard(step, i, num) {
   el.className = "gcard";
   el.draggable = true;
   el.title = "คลิกเพื่อแก้ไขขั้นตอนนี้";
-  el.innerHTML = `<div class="gthumb">${step.image ? "<canvas></canvas>" : `<div class="gtext">${esc(step.text)}</div>`}</div>
+  el.innerHTML = `<div class="gthumb"></div>
     <div class="gcap">${num ? `<span class="num">${num}</span>` : `<span class="notetag">หมายเหตุ</span>`}
       <span class="gt">${esc(step.text)}</span></div>`;
-  if (step.image) {
+  const thumb = el.querySelector(".gthumb");
+  const text = t => { thumb.innerHTML = `<div class="gtext">${esc(t)}</div>`; };
+  if (!step.image) {
+    text(step.text);
+  } else if (isGif(step)) {
+    const im = document.createElement("img");
+    im.alt = ""; im.onerror = () => text("เปิดภาพนี้ไม่ได้"); im.src = imgUrl(GID, step.image);
+    thumb.appendChild(im);
+  } else {
+    const cv = document.createElement("canvas");
+    thumb.appendChild(cv);
     const img = new Image();
-    img.onload = () => drawStepCanvas(el.querySelector("canvas"), img, step, 480);
+    img.onload = () => drawStepCanvas(cv, img, step, 480);
+    img.onerror = () => text("เปิดภาพนี้ไม่ได้");
     img.src = imgUrl(GID, step.image);
   }
   dragSource(el, i); dropTarget(el, i);
@@ -411,126 +527,4 @@ function gridCard(step, i, num) {
     document.getElementById("edit-" + step.id)?.scrollIntoView({block: "start"});
   };
   return el;
-}
-
-// ---- image editor: markers (add / drag / color / size / delete) and crop
-function imageEditor(step) {
-  const box = document.createElement("div");
-  const tools = document.createElement("div");
-  tools.className = "etools";
-  tools.innerHTML = `<button type="button" class="btn addmk">+ เพิ่มวง</button>
-    <button type="button" class="btn crop">ครอปภาพ</button>
-    ${step.crop ? '<button type="button" class="btn uncrop">ล้างครอป</button>' : ""}`;
-  box.appendChild(tools);
-  const stage = document.createElement("div");
-  stage.className = "stage";
-  const img = document.createElement("img");
-  img.src = imgUrl(GID, step.image);
-  stage.appendChild(img);
-  box.appendChild(stage);
-  const ctrl = document.createElement("div");
-  ctrl.className = "mk-ctrl";
-  box.appendChild(ctrl);
-
-  img.onload = () => {
-    const natW = img.naturalWidth, natH = img.naturalHeight;
-    const scale = () => stage.clientWidth / natW;
-    step.markers = step.markers || [];
-
-    function drawMarkers() {
-      if (!stage.isConnected) { window.removeEventListener("resize", drawMarkers); return; }
-      stage.querySelectorAll(".marker,.croprect").forEach(n => n.remove());
-      const sc = scale();
-      if (step.crop) {
-        const cr = document.createElement("div");
-        cr.className = "croprect";
-        cr.style.left = step.crop.x * sc + "px"; cr.style.top = step.crop.y * sc + "px";
-        cr.style.width = step.crop.w * sc + "px"; cr.style.height = step.crop.h * sc + "px";
-        stage.appendChild(cr);
-      }
-      for (const m of step.markers) {
-        const d = document.createElement("div");
-        d.className = "marker" + (sel === m ? " sel" : "");
-        d.style.left = m.x * sc + "px"; d.style.top = m.y * sc + "px";
-        d.style.width = m.size * sc + "px"; d.style.height = m.size * sc + "px";
-        d.style.borderColor = m.color; d.style.background = m.color + "26";
-        d.onpointerdown = ev => startDrag(ev, m, sc);
-        stage.appendChild(d);
-      }
-      renderCtrl();
-    }
-    function renderCtrl() {
-      if (!sel || !step.markers.includes(sel)) { ctrl.innerHTML = ""; return; }
-      ctrl.innerHTML = `สีวงนี้ <input type="color" class="mcol" value="${sel.color.toLowerCase()}">
-        ขนาด <input type="range" class="msize" min="24" max="96" value="${sel.size}">
-        <button type="button" class="btn danger mdel">ลบวง</button>`;
-      ctrl.querySelector(".mcol").oninput = e => { sel.color = e.target.value.toUpperCase(); drawMarkers(); scheduleSave(); };
-      ctrl.querySelector(".msize").oninput = e => { sel.size = lastSize = +e.target.value; drawMarkers(); scheduleSave(); };
-      ctrl.querySelector(".mdel").onclick = () => {
-        step.markers.splice(step.markers.indexOf(sel), 1); sel = null; drawMarkers(); scheduleSave();
-      };
-    }
-    function startDrag(ev, m, sc) {
-      ev.preventDefault(); sel = m; drawMarkers();
-      const move = e => {
-        const rect = stage.getBoundingClientRect();
-        m.x = Math.max(0, Math.min(natW, (e.clientX - rect.left) / sc));
-        m.y = Math.max(0, Math.min(natH, (e.clientY - rect.top) / sc));
-        drawMarkers();
-      };
-      const up = () => {
-        document.removeEventListener("pointermove", move);
-        document.removeEventListener("pointerup", up);
-        scheduleSave();
-      };
-      document.addEventListener("pointermove", move);
-      document.addEventListener("pointerup", up);
-    }
-
-    tools.querySelector(".addmk").onclick = () => {
-      stage.style.cursor = "crosshair";
-      stage.onpointerdown = ev => {
-        const rect = stage.getBoundingClientRect(), sc = scale();
-        const m = {x: (ev.clientX - rect.left) / sc, y: (ev.clientY - rect.top) / sc, color: clickColor(), size: lastSize};
-        step.markers.push(m); sel = m; stage.style.cursor = ""; stage.onpointerdown = null;
-        drawMarkers(); scheduleSave();
-      };
-    };
-    tools.querySelector(".crop").onclick = () => {
-      stage.style.cursor = "crosshair";
-      stage.onpointerdown = ev => {
-        const r = stage.getBoundingClientRect();
-        // pointer positions clamped to the stage, so a crop never leaves the image
-        const at = e => ({x: Math.max(0, Math.min(r.width, e.clientX - r.left)),
-                          y: Math.max(0, Math.min(r.height, e.clientY - r.top))});
-        const start = at(ev);
-        const rectEl = document.createElement("div");
-        rectEl.className = "croprect"; stage.appendChild(rectEl);
-        const box = e => { const p = at(e);
-          return {x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y)}; };
-        const move = e => { const b = box(e);
-          rectEl.style.left = b.x + "px"; rectEl.style.top = b.y + "px";
-          rectEl.style.width = b.w + "px"; rectEl.style.height = b.h + "px"; };
-        const up = e => {
-          document.removeEventListener("pointermove", move);
-          document.removeEventListener("pointerup", up);
-          stage.style.cursor = ""; stage.onpointerdown = null;
-          const b = box(e), sc = scale();
-          if (b.w > 10 && b.h > 10) {
-            step.crop = {x: b.x / sc, y: b.y / sc, w: b.w / sc, h: b.h / sc};
-            scheduleSave(); renderSteps();
-          } else drawMarkers();
-        };
-        document.addEventListener("pointermove", move);
-        document.addEventListener("pointerup", up);
-      };
-    };
-    const un = tools.querySelector(".uncrop");
-    if (un) un.onclick = () => { step.crop = null; scheduleSave(); renderSteps(); };
-
-    stage.onclick = e => { if (e.target === img) { sel = null; drawMarkers(); } };
-    drawMarkers();
-    window.addEventListener("resize", drawMarkers);
-  };
-  return box;
 }
