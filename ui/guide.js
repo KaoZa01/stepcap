@@ -388,9 +388,6 @@ async function downloadStepImage(step) {
   if (r.saved) toast("บันทึกภาพแล้ว");
 }
 
-// Until the full-window editor (ui/editor.js) exists.
-function openImageEditor(stepId) { toast("เร็วๆ นี้"); }
-
 // ---- steps (linear cards or grid thumbnails)
 function renderSteps() {
   const host = document.getElementById("ewrap");

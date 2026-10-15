@@ -66,7 +66,12 @@ def seed(st: Path):
          "crop": None,
          "markers": [{"x": 40, "y": 40, "color": ORANGE, "size": 44},
                      {"x": 90, "y": 90, "color": ORANGE, "size": 44}]},
+        {"id": "a3", "kind": "image", "text": "a gif", "image": "g.gif",
+         "crop": None, "markers": []},
     ])
+    gif = BytesIO()
+    Image.new("RGB", (40, 30), (255, 0, 0)).save(gif, "GIF")
+    (st / "noise" / "g.gif").write_bytes(gif.getvalue())
     _guide(st, "broken", [
         {"id": "b1", "kind": "click", "text": "missing", "image": "missing.png",
          "crop": None, "markers": []},
@@ -240,10 +245,58 @@ def test_broken_image_tolerated():
     assert js("return document.querySelectorAll('.step').length;") == 1
 
 
+_OPEN = ("openImageEditor(STATE.steps[0].id); await IED.ready;")
+_PTR = ("const c = document.querySelector('.ied canvas'), r = c.getBoundingClientRect();"
+        "const ev = (t, x, y) => c.dispatchEvent(new PointerEvent(t,"
+        " {clientX: r.left + x, clientY: r.top + y, bubbles: true}));")
+_STATE = ("return JSON.stringify([IED.step.image, IED.step.markers, IED.step.annotations,"
+          " IED.step.redactions, IED.step.crop]);")
+
+
+def test_editor_draws_box_and_undoes():
+    page("guide=noise&mode=edit")
+    js(_OPEN)
+    n = js("return IED.step.annotations.length;")
+    js(_PTR + "document.querySelector('.ied [data-tool=box]').click();"
+       "ev('pointerdown', 20, 20); ev('pointermove', 120, 90); ev('pointerup', 120, 90);")
+    assert js("return IED.step.annotations.length;") == n + 1
+    a = js("return IED.step.annotations.at(-1);")
+    assert a["type"] == "box" and a["w"] > 10 and a["h"] > 10, a
+    js("IED.undo();")
+    assert js("return IED.step.annotations.length;") == n
+
+
+def test_editor_maps_coordinates():
+    p = js("const c = document.querySelector('.ied canvas'), r = c.getBoundingClientRect();"
+           "return IED.toImage(r.right - 1, r.bottom - 1);")
+    assert 318 <= p["x"] <= 320 and 198 <= p["y"] <= 200, p  # noise image is 320x200
+
+
+def test_undo_restores_replaced_image():
+    before = js(_STATE)
+    assert js(_png_js("r.png") + "return await IED.replaceImage(file);") is True
+    assert js("return IED.step.markers.length + IED.step.annotations.length"
+              " + IED.step.redactions.length;") == 0
+    assert js("return IED.step.image;") != json.loads(before)[0]
+    js("IED.undo(); await IED.ready;")
+    assert js(_STATE) == before
+
+
+def test_editor_gif_tools_disabled():
+    js("closeImageEditor(); openImageEditor('a3'); await IED.ready;")
+    assert js("return [...document.querySelectorAll('.ied [data-tool]')]"
+              ".filter(b => b.dataset.tool !== 'select')"
+              ".every(b => b.getAttribute('aria-disabled') === 'true');") is True
+    js("closeImageEditor();")
+    assert js("return document.querySelector('.ied') === null;") is True
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
-         test_image_paste_adds_step, test_broken_image_tolerated]
+         test_image_paste_adds_step, test_broken_image_tolerated,
+         test_editor_draws_box_and_undoes, test_editor_maps_coordinates,
+         test_undo_restores_replaced_image, test_editor_gif_tools_disabled]
 
 
 def run_all(holder):
