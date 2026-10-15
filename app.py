@@ -382,13 +382,22 @@ def poke_running():
         pass
 
 
-def make_app_icon(path: Path):
-    from PIL import Image, ImageDraw
-    img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle([8, 8, 248, 248], radius=56, fill=(251, 146, 60, 255))
-    d.ellipse([64, 64, 192, 192], outline=(255, 255, 255, 255), width=26)
-    img.save(path, sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
+def ensure_app_icon(path: Path) -> bool:
+    """Make the window/shortcut icon once. Never fatal: a locked or
+    unwritable file only costs the custom icon, not the app start."""
+    if path.is_file():
+        return True
+    try:
+        from PIL import Image, ImageDraw
+        img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle([8, 8, 248, 248], radius=56,
+                            fill=(251, 146, 60, 255))
+        d.ellipse([64, 64, 192, 192], outline=(255, 255, 255, 255), width=26)
+        img.save(path, sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
+        return True
+    except OSError:
+        return False
 
 
 def set_window_icon(hwnd):
@@ -409,7 +418,26 @@ def on_closing():
     return False
 
 
+def allow_session_end():
+    """X hides to the tray, but Windows shutdown/sign-out must not be vetoed.
+    pywebview's FormClosing handler cancels every close (our on_closing); this
+    one runs after it and lets a session end through, saving a recording."""
+    from System.Windows.Forms import CloseReason
+    from webview.platforms.winforms import BrowserView
+
+    def on_form_closing(sender, e):
+        if e.CloseReason == CloseReason.WindowsShutDown:
+            if REC.recording:
+                REC.stop_recording()  # saves the guide before Windows ends
+                OV.hide_panel()
+                refresh_state()
+            e.Cancel = False
+
+    BrowserView.instances[WINDOW.uid].FormClosing += on_form_closing
+
+
 def on_shown():
+    allow_session_end()
     h = main_hwnd()
     if h:
         set_window_icon(h)
@@ -503,7 +531,7 @@ def main():
         poke_running()
         return
     shell32.SetCurrentProcessExplicitAppUserModelID("StepCap")
-    make_app_icon(ICON_FILE)
+    ensure_app_icon(ICON_FILE)
 
     rec = Recorder(STORAGE)
     rec.set_monitor(recorder.monitor_index(

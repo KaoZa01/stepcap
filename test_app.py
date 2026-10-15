@@ -27,6 +27,11 @@ U.SendMessageW.restype = ctypes.c_ssize_t
 U.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 U.EnumChildWindows.argtypes = [wintypes.HWND, R.WNDENUMPROC, wintypes.LPARAM]
 WM_CLOSE, WM_SETTEXT, WM_GETTEXT, WM_COMMAND = 0x0010, 0x000C, 0x000D, 0x0111
+WM_QUERYENDSESSION, SMTO_ABORTIFHUNG = 0x0011, 0x0002
+U.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
+                                  wintypes.LPARAM, wintypes.UINT, wintypes.UINT,
+                                  ctypes.POINTER(ctypes.c_size_t)]
+U.SendMessageTimeoutW.restype = ctypes.c_ssize_t
 OLD_ID = "20260101-090000"
 OLD_GUIDE = {"id": OLD_ID, "title": "explorer - 1 ม.ค. 2569 09:00",
              "created": "2026-01-01T09:00:00",
@@ -296,9 +301,24 @@ def test_export_save_as():
     assert target.read_text(encoding="utf-8") == "<html>สวัสดี</html>"
 
 
+def test_shutdown_not_blocked():
+    """Windows shutdown/sign-out must not be vetoed by X-hides-to-tray, and a
+    running recording is saved first. Runs last: it may hide the window."""
+    win = CTX["win"]
+    post("/api/start")
+    res = ctypes.c_size_t(0)
+    ok = U.SendMessageTimeoutW(win, WM_QUERYENDSESSION, 0, 0, SMTO_ABORTIFHUNG,
+                               5000, ctypes.byref(res))
+    assert ok, "WM_QUERYENDSESSION timed out"
+    assert res.value == 1, "StepCap vetoed the session end"
+    assert get("/api/status")["recording"] is False, "recording not stopped first"
+    assert CTX["proc"].poll() is None  # only a query: the app keeps running
+
+
 TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
-         test_library_routes, test_ui_served, test_export_save_as]
+         test_library_routes, test_ui_served, test_export_save_as,
+         test_shutdown_not_blocked]
 
 if __name__ == "__main__":
     import traceback

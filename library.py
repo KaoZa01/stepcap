@@ -53,15 +53,26 @@ def write_json_atomic(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
+def _is_guide(g) -> bool:
+    """Shape every reader relies on; anything else is treated as not a guide."""
+    if not isinstance(g, dict) or not isinstance(g.get("steps"), list):
+        return False
+    if any(g.get(k) is not None and not isinstance(g[k], str)
+           for k in ("title", "created", "updated", "app", "app_icon")):
+        return False
+    if g.get("settings") is not None and not isinstance(g["settings"], dict):
+        return False
+    return all(isinstance(s, dict) and isinstance(s.get("text", ""), (str, type(None)))
+               for s in g["steps"])
+
+
 def _load_raw(folder: Path) -> dict | None:
     """guide.json as stored, or None when missing or not a guide."""
     try:
         g = json.loads((folder / "guide.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(g, dict) or not isinstance(g.get("steps"), list):
-        return None
-    return g
+    return g if _is_guide(g) else None
 
 
 def normalize(g: dict) -> dict:
@@ -141,10 +152,13 @@ def save_guide(storage: Path, gid: str, data: dict) -> bool:
     folder = storage / gid
     if not safe_id(gid) or not folder.is_dir():
         return False
-    if not isinstance(data, dict) or not isinstance(data.get("steps"), list):
+    if not _is_guide(data):
         return False
     data = {**data, "id": gid, "updated": now_iso()}
-    write_json_atomic(folder / "guide.json", data)
+    try:
+        write_json_atomic(folder / "guide.json", data)
+    except OSError:  # e.g. the file is held open; the page keeps the edits and retries
+        return False
     return True
 
 

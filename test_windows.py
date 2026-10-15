@@ -88,6 +88,22 @@ def _green_share(rect) -> float:
     return sum(1 for r, g, b in px if g > 200 and r < 60 and b < 60) / len(px)
 
 
+def test_app_icon_never_blocks_startup():
+    """_app.ico is made once; an unwritable path must not crash startup."""
+    import os
+    with tempfile.TemporaryDirectory() as d:
+        os.environ["STEPCAP_STORAGE"] = d  # keep app's import off the real storage
+        import app
+        ico = Path(d) / "_app.ico"
+        assert app.ensure_app_icon(ico) is True and ico.stat().st_size > 0
+        mtime = ico.stat().st_mtime_ns
+        assert app.ensure_app_icon(ico) is True
+        assert ico.stat().st_mtime_ns == mtime  # not rewritten on every launch
+        blocked = Path(d) / "blocked.ico"
+        blocked.mkdir()  # stands in for a file another process holds open
+        assert app.ensure_app_icon(blocked) is False
+
+
 def test_webview_excluded_from_capture():
     """A pywebview window (WebView2 content included) vanishes from
     screenshots once set_capture_excluded is on. Owns the main thread."""

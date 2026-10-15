@@ -120,6 +120,10 @@ function closePopMenu() {
   });
 }
 document.addEventListener("click", e => { if (!e.target.closest(".menu-pop")) closePopMenu(); });
+// A file or link dropped anywhere must not navigate the window away (there is
+// no address bar to come back); step cards handle their own reorder drops.
+document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("drop", e => e.preventDefault());
 document.addEventListener("keydown", e => { if (e.key === "Escape") closePopMenu(); });
 
 // ---------------------------------------------------------------- status poll
@@ -135,7 +139,7 @@ function startStatusPoll(onStatus, ms, beforeLeave) {
     if (st.guide_seq !== SEQ && st.last_guide) {
       SEQ = st.guide_seq;
       clearInterval(POLL);
-      if (beforeLeave) await beforeLeave();
+      if (beforeLeave && (await beforeLeave()) === false) return;  // keep unsaved edits
       goGuide(st.last_guide, "edit");
     }
   };

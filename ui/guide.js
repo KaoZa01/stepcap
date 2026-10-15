@@ -136,12 +136,25 @@ let SAVET = null, lastSize = 44, sel = null;
 const clickColor = () => (STATE.settings.click_color || "#FB923C").toUpperCase();
 const newStepId = () => "s" + Math.random().toString(16).slice(2, 10);
 
-function saveNow() {
+let SAVE_FAILING = false;
+// Autosave. A failed save keeps the edits pending, says so once, and retries.
+async function saveNow() {
   clearTimeout(SAVET); SAVET = null;
-  return post("/api/guide/" + encodeURIComponent(GID), STATE);
+  let ok = false;
+  try { ok = (await post("/api/guide/" + encodeURIComponent(GID), STATE)).ok; } catch { /* offline */ }
+  if (!ok) {
+    if (!SAVE_FAILING) toast("บันทึกไม่สำเร็จ จะลองใหม่อัตโนมัติ");
+    SAVE_FAILING = true;
+    SAVET = setTimeout(saveNow, 3000);
+  } else if (SAVE_FAILING) {
+    SAVE_FAILING = false;
+    toast("บันทึกแล้ว");
+  }
+  return ok;
 }
 function scheduleSave() { clearTimeout(SAVET); SAVET = setTimeout(saveNow, 500); }
-const flush = async () => { if (SAVET) await saveNow(); };
+// true when nothing is left unsaved; callers stay on the page otherwise
+const flush = async () => !SAVET || await saveNow();
 
 function editPage() {
   app.innerHTML = `<header class="gtop">
@@ -157,9 +170,9 @@ function editPage() {
       <div class="tbpop" id="tbpop" hidden></div>
     </div>`;
   document.getElementById("title").oninput = e => { STATE.title = e.target.value; scheduleSave(); };
-  document.getElementById("back").onclick = async () => { await flush(); nav({page: "home"}); };
-  document.getElementById("done").onclick = async () => { await flush(); goGuide(GID, "view"); };
-  document.getElementById("exp").onclick = async () => { await flush(); exportGuide(GID); };
+  document.getElementById("back").onclick = async () => { if (await flush()) nav({page: "home"}); };
+  document.getElementById("done").onclick = async () => { if (await flush()) goGuide(GID, "view"); };
+  document.getElementById("exp").onclick = async () => { if (await flush()) exportGuide(GID); };
   document.querySelectorAll(".tb[data-pop]").forEach(b => b.onclick = e => {
     e.stopPropagation(); toggleToolPop(b.dataset.pop, b);
   });
@@ -255,8 +268,10 @@ function dropTarget(el, i) {
   el.addEventListener("dragover", e => e.preventDefault());
   el.addEventListener("drop", e => {
     e.preventDefault();
-    const from = +e.dataTransfer.getData("text/plain");
-    if (Number.isNaN(from) || from === i) return;
+    const raw = e.dataTransfer.getData("text/plain");
+    if (!/^\d+$/.test(raw)) return;  // only our own step drags carry an index
+    const from = +raw;
+    if (from === i || from >= STATE.steps.length) return;
     const [m] = STATE.steps.splice(from, 1);
     STATE.steps.splice(i, 0, m);
     renderSteps(); scheduleSave();

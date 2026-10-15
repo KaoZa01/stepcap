@@ -72,6 +72,33 @@ def test_step_count_ignores_notes():
                                  {"kind": "type"}]}) == 2
 
 
+def test_wrong_shape_guide_skipped():
+    # valid JSON, wrong shape: must not blank the whole list or the search
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "a", steps=[{"id": "s1", "kind": "click", "text": "x"}])
+        _seed(st, "b", steps=[None])
+        _seed(st, "c", steps=["x"])
+        _seed(st, "d", title=5)
+        _seed(st, "e", created=5)
+        _seed(st, "f", steps=[{"id": "s1", "kind": "click", "text": 5}])
+        _seed(st, "g", settings=[1])
+        assert [s["id"] for s in list_guides(st)] == ["a"]
+        assert [s["id"] for s in list_guides(st, q="x")] == ["a"]
+        trash_guide(st, "b")
+        assert [t["id"] for t in list_trash(st)] == ["b"]  # listed by folder name
+        assert save_guide(st, "a", {"title": "T", "steps": [None]}) is False
+
+
+def test_save_guide_reports_write_failure():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1", title="before")
+        (st / "g1" / "guide.json.tmp").mkdir()  # the temp file cannot be written
+        assert save_guide(st, "g1", {"title": "after", "steps": []}) is False
+        assert _load(st, "g1")["title"] == "before"
+
+
 def test_corrupt_guide_skipped():
     with tempfile.TemporaryDirectory() as d:
         st = Path(d)

@@ -181,14 +181,17 @@ function guideTools(el, g) {
       {label: "เปิด", run: () => goGuide(g.id, "view")},
       {label: "เปลี่ยนชื่อ", run: async () => {
         const title = await uiPrompt("เปลี่ยนชื่อคู่มือ", g.title);
-        if (title !== null && title.trim()) { await post(`/api/guide/${id}/meta`, {title}); refresh(); }
+        if (title !== null && title.trim()) {
+          if (!(await post(`/api/guide/${id}/meta`, {title})).ok) toast(FAILED);
+          refresh();
+        }
       }},
       {label: "ทำสำเนา", run: async () => {
-        await post(`/api/guide/${id}/duplicate`); toast("ทำสำเนาแล้ว"); refresh();
+        toast((await post(`/api/guide/${id}/duplicate`)).ok ? "ทำสำเนาแล้ว" : FAILED); refresh();
       }},
       {label: "ส่งออก", run: () => exportGuide(g.id)},
       {label: "ลบ", danger: true, run: async () => {
-        await post(`/api/guide/${id}/delete`); toast("ย้ายไปถังขยะแล้ว"); refresh();
+        toast((await post(`/api/guide/${id}/delete`)).ok ? "ย้ายไปถังขยะแล้ว" : FAILED); refresh();
       }},
     ]);
   };
@@ -215,6 +218,7 @@ function drawGuides(box, items, emptyText) {
 }
 
 const EMPTY_ALL = "ยังไม่มีคู่มือ กด + บันทึกใหม่ เพื่อเริ่ม";
+const FAILED = "ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง";
 
 async function renderHome(c) {
   const my = ++RENDER;
