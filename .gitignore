@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+# personal screenshots (account name, document titles, desktop) - kept local only
+docs/specs/refs/scribe-home-dark.png
+docs/specs/refs/scribe-home-light-card-hover.png
+docs/specs/refs/viewer-zoomed-preview.png
