@@ -236,7 +236,7 @@ Expected: `ModuleNotFoundError: No module named 'library'`
 - [ ] **Step 4: Run to verify pass**
 
 Run: `.venv/Scripts/python.exe -X utf8 test_library.py`
-Expected: `10/10 passed`
+Expected: `11/11 passed`
 
 - [ ] **Step 5: Commit**
 
@@ -267,7 +267,7 @@ git commit -m "feat: library module for guides on disk (defaults, trash, search,
     - `HOST_APPS = {"ApplicationFrameHost", "StartMenuExperienceHost"}`
     - `extract_icon(exe: str, out: Path) -> bool`
     - `is_own_window(hwnd) -> bool`: PID only.
-    - `find_main_window() -> HWND | None`: a top-level window of this PID titled exactly `APP_TITLE`, visible or hidden.
+    - `find_main_window(title: str = APP_TITLE) -> HWND | None`: a top-level window of this PID with exactly that title, visible or hidden.
     - `set_capture_excluded(hwnd, on: bool) -> bool`
   - `default_storage()` honors `STEPCAP_STORAGE`.
   - New guides from `Recorder._write_guide` carry `updated, bookmarked, app, app_icon, settings`, and their steps have no `app`/`exe`.
@@ -345,13 +345,13 @@ Expected: `ImportError` for `monitor_index` (test_steps), and a failure in `test
   - **`set_capture_excluded`:** `user32.SetWindowDisplayAffinity(hwnd, 0x11 if on else 0)`, with typed `argtypes = [wintypes.HWND, wintypes.DWORD]`. Also type `GetWindowDisplayAffinity` (`[HWND, POINTER(DWORD)]`) for tests. A `None` hwnd returns `False`.
   - **Window checks:**
     - `is_own_window`: `window_pid(hwnd) == os.getpid()` only. Update the docstring: the pywebview window lives in this process, and a WebView2 child's `GA_ROOT` is our form.
-    - `find_main_window`: `EnumWindows`, matching `window_pid == os.getpid()` and `window_title == APP_TITLE`, with no visibility filter.
+    - `find_main_window`: `EnumWindows`, matching `window_pid == os.getpid()` and `window_title == title`, with no visibility filter.
   - **`default_storage`:** `Path(os.environ["STEPCAP_STORAGE"])` when that variable is set and non-empty, otherwise the old path.
 
 - [ ] **Step 5: Run to verify pass**
 
 Run: `.venv/Scripts/python.exe -X utf8 test_steps.py && .venv/Scripts/python.exe -X utf8 test_windows.py && .venv/Scripts/python.exe -X utf8 test_library.py`
-Expected: `10/10 passed`, then every test_windows test `ok`, then `10/10 passed`.
+Expected: `10/10 passed`, then every test_windows test `ok`, then `11/11 passed`.
 
 - [ ] **Step 6: Commit**
 
@@ -376,7 +376,7 @@ git commit -m "feat: record app exe for card icons, PID-only self filter, main-w
 - Produces:
   - **Globals:** `WINDOW` (pywebview `Window`), `QUITTING: bool`.
   - **Functions:**
-    - `main_hwnd()`: cached `find_main_window()`.
+    - `main_hwnd()`: `find_main_window()`, cached once it returns non-None.
     - `show_main()`
     - `quit_app()`
     - `flash_ui(i: int)`
@@ -495,7 +495,7 @@ Expected: FAIL. Either `_run.json` never appears, or the window is Edge's, not t
   1. `webview.create_window("cap-test", html="<body style='margin:0;background:#00ff00'></body>", x=100, y=100, width=400, height=300)`.
   2. `webview.start(func=check, args=(win,))`.
   3. `check` waits for the window, then counts pure-green pixels in `ImageGrab.grab(bbox=rect, all_screens=True)`.
-  4. Assert ≥90% green before. Call `set_capture_excluded(hwnd, True)` (hwnd = this PID's window titled `cap-test`; add an optional `title` parameter to `find_main_window` only if needed). Assert ≤5% green after.
+  4. Assert ≥90% green before. Call `set_capture_excluded(hwnd, True)` (hwnd = `find_main_window("cap-test")`). Assert ≤5% green after.
   5. Destroy the window.
 
   Name it `test_webview_excluded_from_capture`. It proves the WebView2 content inherits the exclusion.
