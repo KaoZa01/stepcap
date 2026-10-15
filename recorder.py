@@ -5,7 +5,6 @@ glue below it. test_steps.py imports only the pure part.
 """
 from __future__ import annotations
 
-import json
 import queue
 import threading
 import time
@@ -72,6 +71,14 @@ def compose_click_text(kind: str, name: str, noun: str, app: str) -> str:
     return s
 
 
+def monitor_index(monitors: list[dict], name: str | None) -> int:
+    """Index of the monitor with that device name; else the primary; else 0."""
+    for m in monitors:
+        if name and m["name"] == name:
+            return m["index"]
+    return next((m["index"] for m in monitors if m["primary"]), 0)
+
+
 def _new_id() -> str:
     return "s" + uuid.uuid4().hex[:8]
 
@@ -112,13 +119,15 @@ class StepBuilder:
             self._typing = None
 
     def add_click(self, kind: str, name: str, noun: str, app: str,
-                  image: str | None = None, marker: dict | None = None) -> dict:
+                  image: str | None = None, marker: dict | None = None,
+                  exe: str = "") -> dict:
         self._flush()
         step = {
             "id": _new_id(),
             "kind": kind,
             "text": compose_click_text(kind, name, noun, app),
             "app": app,
+            "exe": exe,
             "image": image,
             "crop": None,
             "markers": [marker] if marker else [],
@@ -183,13 +192,18 @@ import ctypes
 import os
 from ctypes import wintypes
 
+import library
+
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 ULONG_PTR = ctypes.c_size_t
 LRESULT = ctypes.c_ssize_t
 
-APP_TITLE = "StepCap"  # the editor window's title; never recorded
+APP_TITLE = "StepCap"  # the main window's title
+WDA_EXCLUDEFROMCAPTURE = 0x11
+# apps that only host other apps: their own icon would mislead on a card
+HOST_APPS = {"ApplicationFrameHost", "StartMenuExperienceHost"}
 
 WH_KEYBOARD_LL = 13
 WH_MOUSE_LL = 14
@@ -268,6 +282,9 @@ user32.ToUnicodeEx.argtypes = [wintypes.UINT, wintypes.UINT,
                                ctypes.POINTER(ctypes.c_wchar), ctypes.c_int,
                                wintypes.UINT, wintypes.HKL]
 user32.GetDoubleClickTime.restype = wintypes.UINT
+user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+user32.GetWindowDisplayAffinity.argtypes = [wintypes.HWND,
+                                            ctypes.POINTER(wintypes.DWORD)]
 
 
 def set_dpi_aware():
@@ -338,24 +355,20 @@ def window_center(hwnd) -> tuple[int, int] | None:
     return ((r.left + r.right) // 2, (r.top + r.bottom) // 2)
 
 
-def _is_app_title(title: str) -> bool:
-    return title == APP_TITLE or title.startswith(APP_TITLE + " - ")
-
-
 def is_own_window(hwnd) -> bool:
-    """StepCap's own windows: this process (panel, overlays) or the editor."""
-    if not hwnd:
-        return False
-    return window_pid(hwnd) == os.getpid() or _is_app_title(window_title(hwnd))
+    """StepCap's own windows: everything in this process. The main window is a
+    pywebview form here, and a WebView2 child's GA_ROOT is that form."""
+    return bool(hwnd) and window_pid(hwnd) == os.getpid()
 
 
-def find_app_window():
-    """The StepCap home/editor window (an Edge app window), if one is open."""
+def find_main_window(title: str = APP_TITLE):
+    """This process's top-level window with exactly that title (visible or
+    hidden), e.g. the pywebview main window."""
     found = []
+    me = os.getpid()
 
     def _cb(hwnd, _):
-        if user32.IsWindowVisible(hwnd) and window_pid(hwnd) != os.getpid() \
-                and _is_app_title(window_title(hwnd)):
+        if window_pid(hwnd) == me and window_title(hwnd) == title:
             found.append(hwnd)
             return False
         return True
@@ -364,10 +377,18 @@ def find_app_window():
     return found[0] if found else None
 
 
-def window_info(hwnd) -> tuple[str, str]:
-    """(window title, app name without .exe) for a top-level window."""
+def set_capture_excluded(hwnd, on: bool) -> bool:
+    """Hide (or unhide) one of our windows from screenshots."""
+    if not hwnd:
+        return False
+    return bool(user32.SetWindowDisplayAffinity(
+        hwnd, WDA_EXCLUDEFROMCAPTURE if on else 0))
+
+
+def window_info(hwnd) -> tuple[str, str, str]:
+    """(window title, app name without .exe, exe full path) for a window."""
     title = window_title(hwnd)
-    app = ""
+    exe = ""
     h = kernel32.OpenProcess(0x1000, False, window_pid(hwnd))  # QUERY_LIMITED
     if h:
         try:
@@ -375,14 +396,23 @@ def window_info(hwnd) -> tuple[str, str]:
             pbuf = ctypes.create_unicode_buffer(260)
             if kernel32.QueryFullProcessImageNameW(h, 0, pbuf,
                                                    ctypes.byref(size)):
-                app = Path(pbuf.value).stem
+                exe = pbuf.value
         finally:
             kernel32.CloseHandle(h)
-    return title, app
+    return title, (Path(exe).stem if exe else ""), exe
 
 
-def foreground_info() -> tuple[str, str]:
-    return window_info(user32.GetForegroundWindow())
+def extract_icon(exe: str, out: Path) -> bool:
+    """Save the exe's icon as a PNG (pythonnet, already present for pywebview)."""
+    try:
+        import clr
+        clr.AddReference("System.Drawing")
+        from System.Drawing import Icon
+        from System.Drawing.Imaging import ImageFormat
+        Icon.ExtractAssociatedIcon(exe).ToBitmap().Save(str(out), ImageFormat.Png)
+        return out.is_file()
+    except Exception:
+        return False
 
 
 def _discard(path: str | None):
@@ -519,8 +549,10 @@ class Recorder:
 
     def _write_guide(self, steps: list[dict]) -> dict:
         import shutil
-        gid = time.strftime("%Y%m%d-%H%M%S")
-        app = next((s.get("app") for s in steps if s.get("app")), "StepCap")
+        gid = library.new_id(self.storage)
+        first = next((s for s in steps if s.get("app")), None)
+        app = first["app"] if first else "StepCap"
+        exe = first.get("exe", "") if first else ""
         folder = self.storage / gid
         folder.mkdir(parents=True, exist_ok=True)
         for s in steps:
@@ -535,14 +567,23 @@ class Recorder:
             else:
                 s["image"] = None
             s.pop("app", None)
+            s.pop("exe", None)
+        icon = None
+        if exe and app not in HOST_APPS and                 extract_icon(exe, folder / "app_icon.png"):
+            icon = "app_icon.png"
+        now = library.now_iso()
         guide = {
             "id": gid,
             "title": f"{app} - {thai_timestamp()}",
-            "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "created": now,
+            "updated": now,
+            "bookmarked": False,
+            "app": app,
+            "app_icon": icon,
+            "settings": dict(library.DEFAULT_SETTINGS),
             "steps": steps,
         }
-        (folder / "guide.json").write_text(
-            json.dumps(guide, ensure_ascii=False, indent=2), encoding="utf-8")
+        library.write_json_atomic(folder / "guide.json", guide)
         return guide
 
     # -- hook thread ---------------------------------------------------------
@@ -706,10 +747,10 @@ class Recorder:
         elif kind == "capture":
             _, x, y, hwnd = item
             name, ct = uia.at_point(x, y) if uia else ("", 0)
-            title, app = window_info(hwnd)
+            title, app, exe = window_info(hwnd)
             if self._pending:
                 _discard(self._pending[6])
-            self._pending = (x, y, name, ct, title, app, self._grab())
+            self._pending = (x, y, name, ct, title, app, self._grab(), exe)
         elif kind == "commit":
             _, button, is_drag, t = item
             pend, self._pending = self._pending, None
@@ -733,7 +774,7 @@ class Recorder:
         return str(path)
 
     def _commit_click(self, button, pend, t: float):
-        x, y, name, ct, title, app, img = pend
+        x, y, name, ct, title, app, img, exe = pend
         m = self.monitors[self.selected]
         marker = {"x": x - m["left"], "y": y - m["top"],
                   "color": "#FB923C", "size": 44}
@@ -754,10 +795,12 @@ class Recorder:
                 return
 
         step = self._builder.add_click(button, name, control_noun(ct),
-                                       app_label, image=img, marker=marker)
+                                       app_label, image=img, marker=marker,
+                                       exe=exe)
         self._last_click = step
         self._last_click_t = t
 
 
 def default_storage() -> Path:
-    return Path.home() / "Documents" / "StepCap"
+    override = os.environ.get("STEPCAP_STORAGE")  # tests only
+    return Path(override) if override else Path.home() / "Documents" / "StepCap"

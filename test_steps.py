@@ -1,5 +1,5 @@
 """Self-check for the pure step logic. Run: python test_steps.py"""
-from recorder import StepBuilder, compose_click_text, control_noun
+from recorder import StepBuilder, compose_click_text, control_noun, monitor_index
 
 
 def _typed(b):
@@ -79,6 +79,15 @@ def test_click_flushes_typing():
     b.add_key("x", None, "", False)
     b.add_click("click", "OK", "ปุ่ม", "App")
     assert [s["kind"] for s in b.finish()] == ["type", "click"]
+
+
+def test_monitor_index_fallback():
+    mons = [{"index": 0, "name": r"\\.\DISPLAY1", "primary": False},
+            {"index": 1, "name": r"\\.\DISPLAY2", "primary": True}]
+    assert monitor_index(mons, r"\\.\DISPLAY1") == 0
+    assert monitor_index(mons, r"\\.\DISPLAY9") == 1   # unplugged -> primary
+    assert monitor_index(mons, None) == 1
+    assert monitor_index([{"index": 0, "name": "x", "primary": False}], None) == 0
 
 
 if __name__ == "__main__":

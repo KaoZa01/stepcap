@@ -1,0 +1,4 @@
+comtypes
+Pillow
+pystray
+pywebview

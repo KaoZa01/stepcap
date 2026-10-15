@@ -1,9 +1,14 @@
 """Windows-only check: the global hooks install and receive real OS input.
 Uses harmless input only (1px mouse move and back, F24). Run: python test_windows.py"""
 import ctypes
+import json
+import sys
+import tempfile
 import time
 from ctypes import wintypes
+from pathlib import Path
 
+import library
 import recorder
 
 
@@ -55,6 +60,38 @@ def test_hooks_install_and_fire():
     assert 0x87 in keys, "keyboard hook did not fire"
 
 
+def test_write_guide_fields_and_icon():
+    with tempfile.TemporaryDirectory() as d:
+        rec = recorder.Recorder(Path(d))
+        g = rec._write_guide([{"id": "s1", "kind": "click", "text": "t",
+                               "app": "python", "exe": sys.executable,
+                               "image": None, "crop": None, "markers": []}])
+        disk = json.loads((Path(d) / g["id"] / "guide.json")
+                          .read_text(encoding="utf-8"))
+        assert disk["app"] == "python" and disk["app_icon"] == "app_icon.png"
+        assert (Path(d) / g["id"] / "app_icon.png").stat().st_size > 0
+        assert disk["updated"] == disk["created"] and disk["bookmarked"] is False
+        assert disk["settings"] == library.DEFAULT_SETTINGS
+        assert "app" not in disk["steps"][0] and "exe" not in disk["steps"][0]
+        g2 = rec._write_guide([{"id": "s2", "kind": "click", "text": "t",
+                                "app": "ApplicationFrameHost",
+                                "exe": r"C:\Windows\System32\ApplicationFrameHost.exe",
+                                "image": None, "crop": None, "markers": []}])
+        assert g2["id"] != g["id"] and g2["app_icon"] is None
+
+
 if __name__ == "__main__":
-    test_hooks_install_and_fire()
-    print("ok   test_hooks_install_and_fire")
+    import traceback
+    sys.stdout.reconfigure(encoding="utf-8")
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    failed = 0
+    for fn in fns:
+        try:
+            fn()
+            print(f"ok   {fn.__name__}")
+        except Exception:
+            failed += 1
+            print(f"FAIL {fn.__name__}")
+            traceback.print_exc()
+    print(f"\n{len(fns) - failed}/{len(fns)} passed")
+    raise SystemExit(1 if failed else 0)
