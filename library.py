@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import time
 from datetime import datetime
@@ -16,8 +17,15 @@ from typing import Callable
 
 DEFAULT_SETTINGS = {"toc": False, "step_count": False, "created": False,
                     "updated": False, "layout": "linear",
-                    "click_color": "#FB923C"}
+                    "click_color": "#FB923C", "click_shape": "circle",
+                    "click_size": 44}
 DEFAULT_APP_SETTINGS = {"monitor": None, "view": "grid"}
+
+MAX_IMAGE = 25 * 1024 * 1024  # bytes per uploaded image
+IMAGE_MIME = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif"}
+_MAGIC = ((b"\x89PNG\r\n\x1a\n", "png"), (b"\xff\xd8\xff", "jpg"),
+          (b"GIF87a", "gif"), (b"GIF89a", "gif"))
+_LAYERS = ("markers", "annotations", "redactions")
 
 TRASH = "_trash"
 COPY_SUFFIX = " (สำเนา)"
@@ -62,8 +70,14 @@ def _is_guide(g) -> bool:
         return False
     if g.get("settings") is not None and not isinstance(g["settings"], dict):
         return False
-    return all(isinstance(s, dict) and isinstance(s.get("text", ""), (str, type(None)))
+    return all(isinstance(s, dict)
+               and isinstance(s.get("text", ""), (str, type(None)))
+               and all(_dict_list(s.get(k, [])) for k in _LAYERS)
                for s in g["steps"])
+
+
+def _dict_list(v) -> bool:
+    return isinstance(v, list) and all(isinstance(x, dict) for x in v)
 
 
 def _load_raw(folder: Path) -> dict | None:
@@ -86,9 +100,37 @@ def normalize(g: dict) -> dict:
                                     if " - " in title else "")
     out["app_icon"] = out.get("app_icon") or None
     out["settings"] = {**DEFAULT_SETTINGS, **(out.get("settings") or {})}
-    out["steps"] = [{"image": None, "crop": None, "markers": [], **s}
-                    for s in out.get("steps") or []]
+    steps = []
+    for s in out.get("steps") or []:
+        s = {"image": None, "crop": None, "markers": [], "annotations": [],
+             "redactions": [], **s}
+        s["markers"] = [{"shape": "circle", **m} for m in s["markers"]]
+        steps.append(s)
+    out["steps"] = steps
     return out
+
+
+def image_kind(data: bytes) -> str | None:
+    """png / jpg / gif by the file's first bytes; the name is never trusted."""
+    return next((kind for magic, kind in _MAGIC if data.startswith(magic)), None)
+
+
+def add_image(storage: Path, gid: str, data: bytes) -> str | None:
+    """Save an uploaded image into the guide folder under a new name."""
+    folder = storage / gid
+    kind = image_kind(data)
+    if not safe_id(gid) or not folder.is_dir() or kind is None \
+            or len(data) > MAX_IMAGE:
+        return None
+    while True:
+        name = f"i{secrets.token_hex(4)}.{kind}"
+        if not (folder / name).exists():
+            break
+    try:
+        (folder / name).write_bytes(data)
+    except OSError:
+        return None
+    return name
 
 
 def step_count(g: dict) -> int:

@@ -6,11 +6,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from library import (DEFAULT_APP_SETTINGS, DEFAULT_SETTINGS, duplicate_guide,
-                     empty_trash, list_guides, list_trash, load_settings,
-                     new_id, normalize, purge_guide, rel_time, restore_guide,
-                     save_guide, save_settings, step_count, trash_guide,
-                     update_meta)
+from library import (DEFAULT_APP_SETTINGS, DEFAULT_SETTINGS, MAX_IMAGE,
+                     add_image, duplicate_guide, empty_trash, image_kind,
+                     list_guides, list_trash, load_settings, new_id, normalize,
+                     purge_guide, rel_time, restore_guide, save_guide,
+                     save_settings, step_count, trash_guide, update_meta)
 
 
 def _seed(storage: Path, gid: str, title="T", created="2026-10-01T10:00:00",
@@ -97,6 +97,66 @@ def test_save_guide_reports_write_failure():
         (st / "g1" / "guide.json.tmp").mkdir()  # the temp file cannot be written
         assert save_guide(st, "g1", {"title": "after", "steps": []}) is False
         assert _load(st, "g1")["title"] == "before"
+
+
+def _img_bytes(fmt: str) -> bytes:
+    from io import BytesIO
+    from PIL import Image
+    b = BytesIO()
+    Image.new("RGB", (4, 4), (255, 0, 0)).save(b, fmt)
+    return b.getvalue()
+
+
+def test_normalize_new_image_fields():
+    g = normalize({"id": "x", "title": "A - b", "steps": [
+        {"id": "s1", "kind": "click", "text": "t",
+         "markers": [{"x": 1, "y": 2, "color": "#FB923C", "size": 44}]}]})
+    s = g["steps"][0]
+    assert s["annotations"] == [] and s["redactions"] == []
+    assert s["markers"][0]["shape"] == "circle" and s["markers"][0]["size"] == 44
+    assert g["settings"]["click_shape"] == "circle"
+    assert g["settings"]["click_size"] == 44
+    keep = normalize({**g, "steps": [
+        {**s, "markers": [{**s["markers"][0], "shape": "rect"}]}]})
+    assert keep["steps"][0]["markers"][0]["shape"] == "rect"
+    assert normalize(g) == g
+
+
+def test_wrong_shape_layers_skipped():
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "a")
+        _seed(st, "b", steps=[{"id": "s", "kind": "click", "text": "", "markers": "x"}])
+        _seed(st, "c", steps=[{"id": "s", "kind": "click", "text": "", "annotations": [1]}])
+        _seed(st, "d", steps=[{"id": "s", "kind": "click", "text": "", "redactions": {"x": 1}}])
+        assert [s["id"] for s in list_guides(st)] == ["a"]
+
+
+def test_image_kind():
+    assert image_kind(_img_bytes("PNG")) == "png"
+    assert image_kind(_img_bytes("JPEG")) == "jpg"
+    assert image_kind(_img_bytes("GIF")) == "gif"
+    assert image_kind(b"hello") is None and image_kind(b"") is None
+
+
+def test_add_image_saves_only_real_images():
+    import re
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1")
+        gif = _img_bytes("GIF")
+        n = add_image(st, "g1", gif)
+        assert re.fullmatch(r"i[0-9a-f]{8}\.gif", n or ""), n
+        assert (st / "g1" / n).read_bytes() == gif
+        n2 = add_image(st, "g1", _img_bytes("PNG"))
+        assert n2 and n2 != n and n2.endswith(".png")
+        png = _img_bytes("PNG")
+        assert add_image(st, "g1", b"<html>") is None
+        assert add_image(st, "g1", b"") is None
+        assert add_image(st, "g1", b"\x89PNG\r\n\x1a\n" + b"0" * MAX_IMAGE) is None
+        assert add_image(st, "../x", png) is None
+        assert add_image(st, "missing", png) is None
+        assert sorted(f.name for f in (st / "g1").iterdir()) == sorted(["guide.json", n, n2])
 
 
 def test_corrupt_guide_skipped():
