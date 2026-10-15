@@ -21,7 +21,12 @@ HERE = Path(__file__).resolve().parent
 U = R.user32
 U.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
                            wintypes.LPARAM]
-WM_CLOSE = 0x0010
+U.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
+                          ctypes.c_wchar_p]
+U.SendMessageW.restype = ctypes.c_ssize_t
+U.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+U.EnumChildWindows.argtypes = [wintypes.HWND, R.WNDENUMPROC, wintypes.LPARAM]
+WM_CLOSE, WM_SETTEXT, WM_GETTEXT, WM_COMMAND = 0x0010, 0x000C, 0x000D, 0x0111
 OLD_ID = "20260101-090000"
 OLD_GUIDE = {"id": OLD_ID, "title": "explorer - 1 ม.ค. 2569 09:00",
              "created": "2026-01-01T09:00:00",
@@ -95,6 +100,50 @@ def find_win(pid):
 
     U.EnumWindows(R.WNDENUMPROC(_cb), 0)
     return found[0] if found else None
+
+
+def class_name(hwnd) -> str:
+    buf = ctypes.create_unicode_buffer(256)
+    U.GetClassNameW(hwnd, buf, 256)
+    return buf.value
+
+
+def save_dialog(pid):
+    found = []
+
+    def _cb(hwnd, _):
+        if R.window_pid(hwnd) == pid and class_name(hwnd) == "#32770"                 and U.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+
+    U.EnumWindows(R.WNDENUMPROC(_cb), 0)
+    return found[0] if found else None
+
+
+def child_edits(hwnd):
+    out = []
+
+    def _cb(h, _):
+        if class_name(h) == "Edit" and U.IsWindowVisible(h):
+            out.append(h)
+        return True
+
+    U.EnumChildWindows(hwnd, R.WNDENUMPROC(_cb), 0)
+    return out
+
+
+def edit_text(hwnd) -> str:
+    buf = ctypes.create_unicode_buffer(1024)
+    U.SendMessageW(hwnd, WM_GETTEXT, 1024, ctypes.cast(buf, ctypes.c_wchar_p))
+    return buf.value
+
+
+def export_async(gid, body):
+    out = {}
+    t = __import__("threading").Thread(
+        target=lambda: out.setdefault("r", post(f"/api/guide/{gid}/export", body)))
+    t.start()
+    return t, out
 
 
 def affinity(hwnd) -> int:
@@ -208,9 +257,31 @@ def test_ui_served():
     assert raw("/", token=False)[0] == 403
 
 
+def test_export_save_as():
+    # cancel: nothing written, saved is null
+    t, out = export_async(OLD_ID, b"<html>cancel</html>")
+    dlg = wait(lambda: save_dialog(CTX["pid"]), 10)
+    assert dlg, "no Save As dialog appeared"
+    edits = child_edits(dlg)
+    assert any(edit_text(e).endswith("09_00.html") for e in edits),         [edit_text(e) for e in edits]  # title-derived name, ":" made safe
+    U.PostMessageW(dlg, WM_CLOSE, 0, 0)
+    t.join(10)
+    assert out["r"] == {"saved": None}
+    # save: the page's bytes land at the chosen path
+    target = CTX["storage"] / "export-test.html"
+    t, out = export_async(OLD_ID, "<html>สวัสดี</html>".encode("utf-8"))
+    dlg = wait(lambda: save_dialog(CTX["pid"]), 10)
+    name_box = next(e for e in child_edits(dlg) if edit_text(e).endswith(".html"))
+    U.SendMessageW(name_box, WM_SETTEXT, 0, str(target))
+    U.PostMessageW(dlg, WM_COMMAND, 1, 0)  # IDOK
+    t.join(10)
+    assert Path(out["r"]["saved"]).resolve() == target.resolve(), out  # 8.3 vs long
+    assert target.read_text(encoding="utf-8") == "<html>สวัสดี</html>"
+
+
 TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
-         test_library_routes, test_ui_served]
+         test_library_routes, test_ui_served, test_export_save_as]
 
 if __name__ == "__main__":
     import traceback

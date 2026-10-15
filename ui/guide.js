@@ -1,87 +1,131 @@
-// Guide page (temporary: the old editor moved as-is; view/edit mode replace it).
+// Guide page: view mode (full screenshots, TOC/meta switches), edit mode, and
+// export. renderGuide + drawStepCanvas are self-contained so the exported file
+// runs exactly the same rendering code as view mode.
 "use strict";
-let GID = null;
-const DISPLAY_W = 680;
+let GID = null, STATE = null;
 const app = document.getElementById("app");
 
-async function guidePage(id, mode) { GID = id; document.body.classList.add("gp"); editor(); }
-async function exportGuide(gid) { toast("เร็วๆ นี้"); }
-
-// region of the image to show: explicit crop, else bbox around markers, else full
-function regionFor(step, w, h){
-  if(step.crop) return step.crop;
-  const ms = step.markers || [];
-  if(!ms.length) return {x:0,y:0,w,h};
-  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-  for(const m of ms){ x0=Math.min(x0,m.x-m.size); y0=Math.min(y0,m.y-m.size);
-    x1=Math.max(x1,m.x+m.size); y1=Math.max(y1,m.y+m.size); }
-  const pad=50; x0-=pad;y0-=pad;x1+=pad;y1+=pad;
-  x0=Math.max(0,x0);y0=Math.max(0,y0);x1=Math.min(w,x1);y1=Math.min(h,y1);
-  return {x:x0,y:y0,w:Math.max(1,x1-x0),h:Math.max(1,y1-y0)};
-}
-
-// draw one click step onto a canvas (used by preview + export; self-contained)
-function drawStep(canvas, img, step){
-  const w=img.naturalWidth, h=img.naturalHeight;
-  const r = regionFor(step, w, h);
-  const scale = DISPLAY_W / r.w;
-  canvas.width = DISPLAY_W;
-  canvas.height = Math.round(r.h*scale);
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(img, r.x, r.y, r.w, r.h, 0, 0, canvas.width, canvas.height);
-  for(const m of (step.markers||[])){
-    const cx=(m.x-r.x)*scale, cy=(m.y-r.y)*scale, rad=(m.size/2)*scale;
-    ctx.beginPath(); ctx.arc(cx,cy,rad,0,7);
-    ctx.fillStyle = m.color+"26"; ctx.fill();
-    ctx.lineWidth = Math.max(3, rad*0.14); ctx.strokeStyle = m.color; ctx.stroke();
+// One step's screenshot: the crop (or the whole image), never zoomed; markers on top.
+function drawStepCanvas(canvas, img, step) {
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const c0 = step.crop || {x: 0, y: 0, w: W, h: H};
+  const x = Math.min(Math.max(0, c0.x), W - 1), y = Math.min(Math.max(0, c0.y), H - 1);
+  const r = {x, y, w: Math.min(c0.w, W - x), h: Math.min(c0.h, H - y)};  // crop kept inside the image
+  canvas.width = Math.max(1, Math.round(r.w));
+  canvas.height = Math.max(1, Math.round(r.h));
+  const c = canvas.getContext("2d");
+  c.drawImage(img, r.x, r.y, r.w, r.h, 0, 0, canvas.width, canvas.height);
+  const k = Math.max(1, canvas.width / 960);  // keep rings visible once scaled down
+  for (const m of step.markers || []) {
+    const rad = m.size / 2;
+    c.beginPath(); c.arc(m.x - r.x, m.y - r.y, rad, 0, 2 * Math.PI);
+    c.fillStyle = m.color + "26"; c.fill();
+    c.lineWidth = Math.max(3 * k, rad * 0.14); c.strokeStyle = m.color; c.stroke();
   }
 }
 
-// read-only render of a whole guide into root (async: loads images). Self-contained
-// so it can be stringified into the exported file. Each step uses step._src for image.
-async function renderGuide(guide, root){
-  function regionFor(step, w, h){
-    if(step.crop) return step.crop;
-    const ms = step.markers || []; if(!ms.length) return {x:0,y:0,w,h};
-    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-    for(const m of ms){ x0=Math.min(x0,m.x-m.size); y0=Math.min(y0,m.y-m.size);
-      x1=Math.max(x1,m.x+m.size); y1=Math.max(y1,m.y+m.size); }
-    const pad=50; x0=Math.max(0,x0-pad);y0=Math.max(0,y0-pad);
-    x1=Math.min(w,x1+pad);y1=Math.min(h,y1+pad);
-    return {x:x0,y:y0,w:Math.max(1,x1-x0),h:Math.max(1,y1-y0)};
-  }
-  const E = s => (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-  const DW = 680;
-  root.innerHTML = '<div class="rg-wrap"><h1>'+E(guide.title)+'</h1></div>';
+// Read-only render of a whole guide into root. Each step's image comes from
+// step._src. Notes: no number, not counted, not in the TOC.
+async function renderGuide(guide, root) {
+  const E = s => (s == null ? "" : String(s)).replace(/[&<>"']/g,
+    c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+  const S = guide.settings || {};
+  const fmt = iso => {
+    const d = new Date(iso);
+    return iso && !isNaN(d) ? d.toLocaleDateString("th-TH", {year: "numeric", month: "short", day: "numeric"}) : "";
+  };
+  const numbered = guide.steps.filter(s => s.kind !== "note");
+  const meta = [];
+  if (S.step_count) meta.push(numbered.length + " ขั้นตอน");
+  if (S.created && fmt(guide.created)) meta.push("สร้างเมื่อ " + fmt(guide.created));
+  if (S.updated && fmt(guide.updated)) meta.push("แก้ไขล่าสุด " + fmt(guide.updated));
+  let html = '<div class="rg-wrap"><h1>' + E(guide.title) + "</h1>";
+  if (meta.length) html += '<div class="rg-meta">' + meta.map(E).join(" · ") + "</div>";
+  if (S.toc && numbered.length)
+    html += '<nav class="rg-toc"><b>สารบัญ</b><ol>' + numbered.map(s =>
+      '<li><a href="#step-' + E(s.id) + '">' + E(s.text) + "</a></li>").join("") + "</ol></nav>";
+  root.innerHTML = html + "</div>";
   const wrap = root.querySelector(".rg-wrap");
-  let n=0;
-  for(const step of guide.steps){
-    n++;
-    const div = document.createElement("div"); div.className="rg-step";
-    if(step.kind==="note"){
-      div.innerHTML = '<div class="rg-note">'+E(step.text)+'</div>';
-      wrap.appendChild(div); continue;
-    }
-    div.innerHTML = '<div class="rg-head"><div class="rg-num">'+n+'</div><div>'+E(step.text)+'</div></div>';
-    if(step._src){
-      const cv=document.createElement("canvas"); div.appendChild(cv);
-      await new Promise(res=>{ const im=new Image();
-        im.onload=()=>{ const r=regionFor(step,im.naturalWidth,im.naturalHeight);
-          const sc=DW/r.w; cv.width=DW; cv.height=Math.round(r.h*sc);
-          const c=cv.getContext("2d");
-          c.drawImage(im,r.x,r.y,r.w,r.h,0,0,cv.width,cv.height);
-          for(const m of (step.markers||[])){ const cx=(m.x-r.x)*sc,cy=(m.y-r.y)*sc,rr=(m.size/2)*sc;
-            c.beginPath();c.arc(cx,cy,rr,0,7);c.fillStyle=m.color+"26";c.fill();
-            c.lineWidth=Math.max(3,rr*0.14);c.strokeStyle=m.color;c.stroke(); }
-          res(); };
-        im.onerror=res; im.src=step._src; });
+  let n = 0;
+  for (const step of guide.steps) {
+    const div = document.createElement("div");
+    div.className = "rg-step";
+    div.id = "step-" + step.id;
+    if (step.kind === "note") {
+      div.innerHTML = '<div class="rg-note">' + E(step.text) + "</div>";
+    } else {
+      div.innerHTML = '<div class="rg-head"><div class="rg-num">' + (++n) + "</div><div>" + E(step.text) + "</div></div>";
+      if (step._src) {
+        const cv = document.createElement("canvas");
+        div.appendChild(cv);
+        const img = new Image();
+        img.onload = () => drawStepCanvas(cv, img, step);
+        img.src = step._src;
+      }
     }
     wrap.appendChild(div);
   }
 }
 
+async function guidePage(id, mode) {
+  GID = id;
+  try {
+    const r = await api("/api/guide/" + encodeURIComponent(id));
+    if (!r.ok) throw new Error(r.status);
+    STATE = await r.json();
+  } catch {
+    return nav({page: "home"});
+  }
+  document.title = "StepCap - " + STATE.title;
+  if (mode === "edit") editPage(); else viewPage();
+}
+
+function viewPage() {
+  app.innerHTML = `<header class="gtop">
+      <button class="icon-btn" id="back" title="กลับหน้าหลัก">${ICON.back}</button>
+      <div class="gtitle">${esc(STATE.title)}</div>
+      <button class="btn" id="edit">${ICON.edit} แก้ไข</button>
+      <button class="btn dark" id="exp">${ICON.export} ส่งออก</button>
+    </header><div class="gbody"><div id="rg"></div></div>`;
+  document.getElementById("back").onclick = () => nav({page: "home"});
+  document.getElementById("edit").onclick = () => goGuide(GID, "edit");
+  document.getElementById("exp").onclick = () => exportGuide(GID);
+  const g = {...STATE, steps: STATE.steps.map(s => s.image ? {...s, _src: imgUrl(GID, s.image)} : s)};
+  renderGuide(g, document.getElementById("rg"));
+  startStatusPoll(() => {}, 1000);
+}
+
+const asDataUrl = blob => new Promise(res => {
+  const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob);
+});
+
+// One self-contained HTML file that looks like view mode; saved via Save As.
+async function exportGuide(gid) {
+  const g = await getJSON("/api/guide/" + encodeURIComponent(gid));
+  const steps = [];
+  for (const s of g.steps) {
+    const c = {...s};
+    if (s.image) c._src = await asDataUrl(await (await api("/img/" + encodeURIComponent(gid) +
+      "/" + encodeURIComponent(s.image))).blob());
+    delete c.image;
+    steps.push(c);
+  }
+  // "<" escaped so step text such as "</script>" cannot end the script early
+  const json = JSON.stringify({...g, steps}).replace(/</g, "\\u003c");
+  const css = document.getElementById("rg-css").textContent;
+  const html = `<!doctype html><html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(g.title)}</title>
+<style>body{margin:0;padding:32px 24px;background:#fff}${css}</style></head>
+<body><div id="root"></div><script>const guide=${json};
+${drawStepCanvas}
+(${renderGuide})(guide, document.getElementById("root"));<\/script></body></html>`;
+  const r = await (await api("/api/guide/" + encodeURIComponent(gid) + "/export",
+    {method: "POST", headers: {"Content-Type": "text/html; charset=utf-8"}, body: html})).json();
+  if (r.saved) toast("บันทึกไฟล์แล้ว");
+}
+
 // ---------------------------------------------------------------- editor
-let STATE=null, SAVET=null, lastColor="#fb923c", lastSize=44, sel=null, cropMode=null;
+let SAVET=null, lastColor="#fb923c", lastSize=44, sel=null, cropMode=null;
 
 function saveNow(){
   clearTimeout(SAVET); SAVET = null;
@@ -91,24 +135,23 @@ function saveNow(){
 }
 function scheduleSave(){ clearTimeout(SAVET); SAVET = setTimeout(saveNow, 500); }
 
-async function editor(){
-  STATE = await (await api("/api/guide/"+encodeURIComponent(GID))).json();
-  document.title = "StepCap - " + STATE.title;
+function editPage(){
   render();
   startStatusPoll(() => {}, 1000, () => SAVET ? saveNow() : null);
 }
 
 function render(){
-  app.innerHTML = `<header>
-      <input id="title" type="text" value="${esc(STATE.title)}" style="flex:1;font-weight:600">
-      <button id="prev">ดูตัวอย่าง</button>
-      <button id="exp" class="primary">Export HTML</button>
-      <button onclick="nav({page:'home'})">คู่มือทั้งหมด</button>
-    </header><div class="wrap"><div id="steps"></div>
-      <button id="addnote" style="margin-top:4px">+ เพิ่มหมายเหตุ</button></div>`;
+  app.innerHTML = `<header class="gtop">
+      <button class="icon-btn" id="back" title="กลับหน้าหลัก">${ICON.back}</button>
+      <input id="title" class="gtitle" type="text" value="${esc(STATE.title)}">
+      <button class="btn dark" id="done">${ICON.done} เสร็จสิ้น</button>
+      <button class="btn" id="exp">${ICON.export} ส่งออก</button>
+    </header><div class="gbody"><div class="ewrap"><div id="steps"></div>
+      <button class="btn" id="addnote">+ เพิ่มหมายเหตุ</button></div></div>`;
   document.getElementById("title").oninput = e => { STATE.title=e.target.value; scheduleSave(); };
-  document.getElementById("prev").onclick = preview;
-  document.getElementById("exp").onclick = doExport;
+  document.getElementById("back").onclick = async () => { if(SAVET) await saveNow(); nav({page:"home"}); };
+  document.getElementById("done").onclick = async () => { if(SAVET) await saveNow(); goGuide(GID, "view"); };
+  document.getElementById("exp").onclick = async () => { if(SAVET) await saveNow(); exportGuide(GID); };
   document.getElementById("addnote").onclick = () => {
     STATE.steps.push({id:"s"+Math.random().toString(16).slice(2,10),kind:"note",text:"หมายเหตุ..."});
     render(); scheduleSave();
@@ -245,41 +288,5 @@ function imageEditor(step){
     window.addEventListener("resize", drawMarkers);
   };
   return box;
-}
-
-// ---------------------------------------------------------------- preview
-async function preview(){
-  const dlg = document.createElement("dialog");
-  dlg.innerHTML = `<div style="padding:16px;max-width:760px"><div style="text-align:right">
-    <button onclick="this.closest('dialog').close()">ปิด</button></div><div id="pv"></div></div>`;
-  document.body.appendChild(dlg); dlg.showModal();
-  const g = JSON.parse(JSON.stringify(STATE));
-  g.steps.forEach(s => { if(s.image) s._src = "/img/"+encodeURIComponent(GID)+"/"+encodeURIComponent(s.image)+"?t="+encodeURIComponent(T); });
-  await renderGuide(g, dlg.querySelector("#pv"));
-  dlg.addEventListener("close", ()=>dlg.remove());
-}
-
-// ---------------------------------------------------------------- export
-async function doExport(){
-  const g = JSON.parse(JSON.stringify(STATE));
-  for(const s of g.steps){
-    if(s.image){
-      const blob = await (await api("/img/"+encodeURIComponent(GID)+"/"+encodeURIComponent(s.image))).blob();
-      s._src = await new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(fr.result); fr.readAsDataURL(blob); });
-    }
-    delete s.image;
-  }
-  const css = document.querySelector("style").textContent;
-  const html = `<!doctype html><html lang="th"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(g.title)}</title>
-<style>${css}</style></head><body><div class="wrap"><div id="root"></div></div>
-<script>const guide=${JSON.stringify(g)};
-(${renderGuide.toString()})(guide,document.getElementById("root"));<\/script></body></html>`;
-  const blob = new Blob([html], {type:"text/html"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = (g.title || "guide").replace(/[\\/:*?"<>|]/g,"_") + ".html";
-  a.click();
-  URL.revokeObjectURL(a.href);
 }
 
