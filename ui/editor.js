@@ -14,6 +14,7 @@ const IED_ICON = {
   black: _svg('<rect x="4" y="6" width="16" height="12" rx="1" fill="currentColor"/>'),
   crop: _svg('<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M2 6h14a2 2 0 0 1 2 2v14"/>'),
   undo: _svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>'),
+  shield: _svg('<path d="M12 3 5 6v6c0 4 3 7.5 7 9 4-1.5 7-5 7-9V6z"/><path d="M9 12h6"/>'),
   image: _svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>'),
 };
 const IED_TOOLS = [["select", "เลือก"], ["marker", "จุดคลิก"], ["arrow", "ลูกศร"], ["box", "กรอบ"],
@@ -56,6 +57,7 @@ function openImageEditor(stepId) {
       ${IED_TOOLS.map(([t, label]) => `<button type="button" class="tb" data-tool="${t}" data-tip="${label}">${IED_ICON[t]}</button>`).join("")}
       <span class="sp"></span>
       <button type="button" class="tb" data-act="undo" data-tip="ย้อนกลับ (Ctrl+Z)">${IED_ICON.undo}</button>
+      <button type="button" class="tb" data-act="redact" data-tip="ซ่อนข้อมูลอัตโนมัติ">${IED_ICON.shield}</button>
       <button type="button" class="tb" data-act="replace" data-tip="เปลี่ยนภาพ">${IED_ICON.image}</button>
       <input type="file" accept="image/png,image/jpeg,image/gif" hidden>
       <button type="button" class="tb" data-act="download" data-tip="ดาวน์โหลดภาพ">${ICON.export}</button>
@@ -68,6 +70,7 @@ function openImageEditor(stepId) {
   });
   const file = el.querySelector("input[type=file]");
   el.querySelector('[data-act="undo"]').onclick = iedUndo;
+  el.querySelector('[data-act="redact"]').onclick = iedAutoRedact;
   el.querySelector('[data-act="replace"]').onclick = () => file.click();
   file.onchange = () => { if (file.files[0]) iedReplace(file.files[0]); file.value = ""; };
   el.querySelector('[data-act="download"]').onclick = () => downloadStepImage(IED.step);
@@ -135,6 +138,25 @@ function iedTools() {
     b.classList.toggle("on", b.dataset.tool === IED.tool);
   });
   IED.canvas?.classList.toggle("crosshair", IED.tool !== "select");
+  const rb = document.querySelector('.ied [data-act="redact"]');
+  if (rb) {
+    rb.classList.toggle("off", gif);
+    rb.setAttribute("aria-disabled", gif ? "true" : "false");
+    rb.dataset.tip = gif ? "ใช้กับ GIF ไม่ได้" : "ซ่อนข้อมูลอัตโนมัติ";
+  }
+}
+
+// The toolbar button: runs whether or not the setting is on (old guides).
+async function iedAutoRedact() {
+  const b = document.querySelector('.ied [data-act="redact"]');
+  if (!b || b.classList.contains("busy") || !IED.img || iedGif()) return;
+  b.classList.add("busy");
+  const step = IED.step;
+  const n = await autoRedact(step, true, iedPush);
+  b.classList.remove("busy");
+  if (n === null || !IED.open || IED.step !== step) return;
+  toast(n ? `ซ่อนเพิ่ม ${n} จุด` : "ไม่พบข้อมูลที่ต้องซ่อน");
+  if (n) iedChanged();
 }
 
 function iedSetTool(t) {
@@ -391,6 +413,8 @@ async function iedReplace(blob) {
   scheduleSave();
   IED.ready = iedLoad();
   await IED.ready;
+  // same undo step as the replace: one Ctrl+Z undoes the new image and its blurs
+  if (await autoRedact(IED.step, false) && IED.open) { iedDraw(); iedOpts(); }
   return true;
 }
 

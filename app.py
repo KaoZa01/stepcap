@@ -85,7 +85,7 @@ def recycle(path: Path):
 _UI_TYPES = {".js": "text/javascript; charset=utf-8",
              ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
 _GUIDE_RE = re.compile(
-    r"/api/guide/([^/]+)(?:/(delete|meta|duplicate|export|image|download))?")
+    r"/api/guide/([^/]+)(?:/(delete|meta|duplicate|export|image|download|redact))?")
 _TRASH_RE = re.compile(r"/api/trash/([^/]+)/(restore|purge)")
 
 
@@ -111,6 +111,29 @@ class Handler(BaseHTTPRequestHandler):
 
     def _missing(self):
         return self._send(404, "not found", "text/plain")
+
+    def _redact(self, gid: str, data: dict | None):
+        """Blur rects for one image of the guide, minus what `existing` covers.
+        Without `force` it honours the redact_on switch."""
+        if data is None or not isinstance(data.get("image"), str) \
+                or not isinstance(data.get("existing", []), list):
+            return self._send(400, "bad request", "text/plain")
+        folder = STORAGE / gid
+        f = folder / data["image"]
+        if not library.safe_name(data["image"]) or f.parent != folder or not f.is_file():
+            return self._missing()
+        cfg = library.load_settings(STORAGE)
+        if not (data.get("force") or cfg["redact_on"]):
+            return self._json({"rects": []})
+        if f.suffix.lower() == ".gif":
+            return self._json({"error": "ภาพ GIF ซ่อนข้อมูลไม่ได้"})
+        try:
+            found = redact.find_rects(f, cfg["redact_rules"], cfg["redact_custom"])
+        except redact.RedactError as e:
+            return self._json({"error": str(e)})
+        existing = [r for r in data.get("existing", []) if isinstance(r, dict)
+                    and all(isinstance(r.get(k), (int, float)) for k in "xywh")]
+        return self._json({"rects": redact.new_rects(found, existing)})
 
     def do_GET(self):
         u = urlparse(self.path)
@@ -219,6 +242,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"id": new}) if new else self._missing()
         if action == "export":
             return self._json({"saved": export_guide(gid, body)})
+        if action == "redact":
+            return self._redact(gid, _obj(body))
         if action == "image":
             name = library.add_image(STORAGE, gid, body)
             return self._json({"image": name}) if name else \

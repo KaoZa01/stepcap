@@ -36,6 +36,17 @@ _b = BytesIO()
 NOISE.save(_b, "PNG")
 NOISE_PNG = _b.getvalue()
 
+def _pii_png() -> bytes:
+    from PIL import ImageDraw, ImageFont
+    img = Image.new("RGB", (640, 80), "white")
+    ImageDraw.Draw(img).text((20, 20), "contact: someone@example.com", fill="black",
+                             font=ImageFont.truetype("arial.ttf", 28))
+    b = BytesIO()
+    img.save(b, "PNG")
+    return b.getvalue()
+
+
+PII_PNG = _pii_png()
 ORANGE, RED, BLUE = "#FB923C", "#EF4444", "#3B82F6"
 
 
@@ -50,6 +61,9 @@ def _guide(st: Path, gid: str, steps: list, **extra):
 
 
 def seed(st: Path):
+    _guide(st, "pii", [{"id": "p1", "kind": "click", "text": "pii", "image": "p.png",
+                        "crop": None, "markers": []}])
+    (st / "pii" / "p.png").write_bytes(PII_PNG)
     _guide(st, "noise", [
         {"id": "a1", "kind": "click", "text": "noise step", "image": "n.png",
          "crop": None,
@@ -454,6 +468,40 @@ def test_redact_cover_and_note():
     assert js("redactCover(null); return document.getElementById('redcover');") is None
 
 
+_WAIT = ("const until = async f => { for (let i = 0; i < 150 && !f(); i++)"
+         " await new Promise(r => setTimeout(r, 100)); };")
+_TOASTS = "[...document.querySelectorAll('.toast')].map(t => t.textContent).join('|')"
+
+
+def test_editor_redact_button():
+    page("guide=pii&mode=edit")
+    js("openImageEditor('p1'); await IED.ready;")
+    js(_WAIT + "document.querySelector('.ied [data-act=redact]').click();"
+       "await until(() => IED.step.redactions.length);")
+    r = js("return IED.step.redactions;")
+    assert len(r) == 1 and r[0]["x"] < 160 < r[0]["x"] + r[0]["w"], r
+    # again: nothing new, says so, adds no undo step
+    js(_WAIT + "document.querySelectorAll('.toast').forEach(t => t.remove());"
+       "document.querySelector('.ied [data-act=redact]').click();"
+       "await until(() => document.querySelector('.toast'));")
+    assert "ไม่พบข้อมูลที่ต้องซ่อน" in js("return " + _TOASTS + ";")
+    assert js("return IED.step.redactions.length;") == 1
+    js("IED.undo();")
+    assert js("return IED.step.redactions.length;") == 0
+    js("closeImageEditor();")
+
+
+def test_pasted_image_redacted():
+    b64 = base64.b64encode(PII_PNG).decode()
+    n = js("return STATE.steps.length;")
+    js(_WAIT + f"const u = Uint8Array.from(atob('{b64}'), c => c.charCodeAt(0));"
+       "const file = new File([u], 'pii.png', {type: 'image/png'});"
+       "const dt = new DataTransfer(); dt.items.add(file);"
+       "document.body.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true}));"
+       f"await until(() => STATE.steps.length > {n} && STATE.steps.at(-1).redactions.length);")
+    assert len(js("return STATE.steps.at(-1).redactions;")) == 1
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
@@ -464,7 +512,8 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_repeated_paste_from_caption_box, test_gif_stays_locked_after_undo,
          test_ring_takes_custom_colour, test_ctrl_z_with_thai_layout,
          test_resize_redaction_after_release, test_colour_picked_before_drawing,
-         test_settings_page_redact, test_redact_cover_and_note]
+         test_settings_page_redact, test_redact_cover_and_note,
+         test_editor_redact_button, test_pasted_image_redacted]
 
 
 def run_all(holder):

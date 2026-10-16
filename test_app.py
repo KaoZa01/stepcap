@@ -297,6 +297,12 @@ def test_redact_settings_route():
     assert s["redact_on"] is True and s["redact_custom"] == ["acme"] and s["view"] == "list"
 
 
+def test_redact_route():
+    assert post(f"/api/guide/{OLD_ID}/redact", {"image": "nope.png", "force": True}) == 404
+    assert post(f"/api/guide/{OLD_ID}/redact", {"image": "../x.png", "force": True}) == 404
+    assert post(f"/api/guide/{OLD_ID}/redact", {"force": True}) == 400
+
+
 def test_ui_served():
     code, html = raw("/")
     assert code == 200 and 'src="ui/shell.js"' in html
@@ -373,7 +379,8 @@ def test_shutdown_not_blocked():
 
 TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
-         test_library_routes, test_redact_settings_route, test_ui_served, test_export_save_as,
+         test_library_routes, test_redact_settings_route, test_redact_route,
+         test_ui_served, test_export_save_as,
          test_upload_and_content_types, test_download_save_as,
          test_shutdown_not_blocked]
 

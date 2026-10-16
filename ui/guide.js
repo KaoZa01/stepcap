@@ -379,6 +379,28 @@ async function uploadImage(blob) {
   return null;
 }
 
+// Asks the server for blur rects on the step's image and adds them; force
+// runs even with the setting off. before() runs only when something will be
+// added (the editor's undo point). Returns how many were added, or null after
+// saying why the image could not be checked.
+async function autoRedact(step, force, before) {
+  const image = step.image;
+  let res;
+  try {
+    const r = await post("/api/guide/" + encodeURIComponent(GID) + "/redact",
+      {image, existing: step.redactions || [], force: !!force});
+    res = r.ok ? await r.json() : {error: "ตรวจภาพไม่สำเร็จ"};
+  } catch { res = {error: "ตรวจภาพไม่สำเร็จ"}; }
+  if (res.error) { toast("ซ่อนข้อมูลอัตโนมัติไม่ได้: " + res.error, 6000); return null; }
+  if (step.image !== image) return 0;  // replaced meanwhile; those rects were for the old one
+  if (res.rects.length) {
+    before?.();
+    step.redactions = (step.redactions || []).concat(res.rects);
+    scheduleSave();
+  }
+  return res.rects.length;
+}
+
 async function addImageStep(blob) {
   const image = await uploadImage(blob);
   if (!image) return;
@@ -388,6 +410,7 @@ async function addImageStep(blob) {
   renderSteps(); scheduleSave();
   const input = document.querySelector("#edit-" + step.id + " .stext");
   if (input) { input.scrollIntoView({block: "center"}); input.focus(); }
+  if (await autoRedact(step, false)) renderSteps();
 }
 
 async function downloadStepImage(step) {
