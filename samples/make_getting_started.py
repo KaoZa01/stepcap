@@ -1,7 +1,8 @@
-"""Rebuilds samples/getting-started/: the sample guide StepCap copies in on
-first launch. Its pictures are StepCap's own screens with made-up guides.
+"""Rebuilds samples/getting-started/ (Thai) or samples/getting-started-en/
+(--lang en): the sample guide StepCap copies in on first launch. Its
+pictures are StepCap's own screens, in that language, with made-up guides.
 
-Run: .venv/Scripts/python.exe samples/make_getting_started.py
+Run: .venv/Scripts/python.exe samples/make_getting_started.py [--lang en]
 
 Launches StepCap on a temp folder and opens a window of its own on it; the
 web screens come from WebView2's CapturePreviewAsync (only the page, never
@@ -22,13 +23,18 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-OUT = HERE / "getting-started"
+LANG = sys.argv[sys.argv.index("--lang") + 1] if "--lang" in sys.argv else "th"
+OUT = HERE / ("getting-started-en" if LANG == "en" else "getting-started")
 sys.path.insert(0, str(ROOT))
 
 import webview  # noqa: E402
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
+import i18n  # noqa: E402
 import library  # noqa: E402
+from i18n import tr  # noqa: E402
+
+i18n.set_lang(LANG)  # the recording panel is drawn in this process
 
 FONT = "LeelawUI.ttf"
 ORANGE = "#FB923C"
@@ -47,13 +53,13 @@ def _screen(title: str, lines: list[str]) -> bytes:
         d.text((60, y), text, font=small, fill="#111827")
         d.rounded_rectangle([300, y - 6, 860, y + 34], 6, fill="white", outline="#9ca3af")
     d.rounded_rectangle([700, 440, 860, 490], 8, fill="#2563eb")
-    d.text((745, 450), "บันทึก", font=small, fill="white")
+    d.text((745, 450), "Save" if LANG == "en" else "บันทึก", font=small, fill="white")
     b = BytesIO()
     img.save(b, "PNG")
     return b.getvalue()
 
 
-FAKE = [
+FAKES = {"th": [
     ("ระบบลางาน", "16 ต.ค. 2569 09:12", "2026-10-16T09:12:00",
      ["คลิก ปุ่ม 'ขอลา' ใน ระบบลางาน", "เลือก 'ลาพักร้อน' ในรายการ ประเภทการลา", "คลิก ปุ่ม 'ส่งคำขอ'"],
      ["ประเภทการลา", "วันที่เริ่ม", "วันที่สิ้นสุด", "เหตุผล"]),
@@ -63,7 +69,19 @@ FAKE = [
     ("เบิกค่าเดินทาง", "14 ต.ค. 2569 10:05", "2026-10-14T10:05:00",
      ["คลิก ปุ่ม 'สร้างใบเบิก'", "พิมพ์ '350' ใน ช่อง จำนวนเงิน", "คลิก ปุ่ม 'แนบใบเสร็จ'"],
      ["รายการ", "จำนวนเงิน", "แนบใบเสร็จ"]),
-]
+], "en": [
+    ("Leave request system", "16 Oct 2026 09:12", "2026-10-16T09:12:00",
+     ['Click the "Request leave" button in Leave request system', 'Choose "Annual leave" in the "Leave type" list',
+      'Click the "Send request" button'],
+     ["Leave type", "Start date", "End date", "Reason"]),
+    ("Set up Outlook email", "15 Oct 2026 14:30", "2026-10-15T14:30:00",
+     ['Click the "File" menu', 'Click the "Add account" button', 'Type "sam@example.com" in the "Email" field'],
+     ["Email", "Display name", "Server"]),
+    ("Travel expense claim", "14 Oct 2026 10:05", "2026-10-14T10:05:00",
+     ['Click the "New claim" button', 'Type "350" in the "Amount" field', 'Click the "Attach receipt" button'],
+     ["Item", "Amount", "Attach receipt"]),
+]}
+FAKE = FAKES[LANG]
 
 
 def seed(st: Path) -> str:
@@ -75,7 +93,7 @@ def seed(st: Path) -> str:
         out = []
         for n, text in enumerate(steps, 1):
             (st / gid / f"s{n}.png").write_bytes(shot)
-            out.append({"id": f"s{n}", "kind": "type" if text.startswith("พิมพ์") else "click",
+            out.append({"id": f"s{n}", "kind": "type" if text.startswith(("พิมพ์", "Type")) else "click",
                         "text": text, "image": f"s{n}.png", "crop": None,
                         "markers": [{"x": 580, "y": 100 + (n - 1) * 80 + 14, "size": 44,
                                      "color": ORANGE, "shape": "circle"}],
@@ -86,7 +104,7 @@ def seed(st: Path) -> str:
             encoding="utf-8")
     # tours seen and no sample: the screens show the plain app
     (st / "settings.json").write_text(json.dumps(
-        {"tours_seen": list(library.TOURS), "sample_added": True}), encoding="utf-8")
+        {"tours_seen": list(library.TOURS), "sample_added": True, "lang": LANG}), encoding="utf-8")
     return "20261016-090000"
 
 
@@ -154,7 +172,7 @@ def panel_shots() -> tuple[Image.Image, dict]:
     def info():  # on the tk thread
         win = ov._panel
         got["hwnd"] = int(win.wm_frame(), 16)
-        stop = next(w for w in win.winfo_children()[-1].winfo_children() if w.cget("text") == "หยุดบันทึก")
+        stop = next(w for w in win.winfo_children()[-1].winfo_children() if w.cget("text") == tr("หยุดบันทึก"))
         got["stop"] = (stop.winfo_rootx() - win.winfo_rootx() + stop.winfo_width() // 2,
                        stop.winfo_rooty() - win.winfo_rooty() + stop.winfo_height() // 2)
         got["size"] = (win.winfo_width(), win.winfo_height())
@@ -186,7 +204,7 @@ def panel_shots() -> tuple[Image.Image, dict]:
 
 
 # ------------------------------------------------------------------ the guide
-STEPS = [  # spec 3.1, in order: (kind, text, picture or None)
+STEPS = {"th": [  # onboarding spec 3.1, in order: (kind, text, picture or None)
     ("note", "คู่มือนี้ทำด้วย StepCap เอง กด แก้ไข เพื่อลองแก้ข้อความ แก้ภาพ หรือส่งออกได้เลย "
              "ไม่ใช้แล้วลบทิ้งได้จากเมนู … ของการ์ด", None),
     ("click", "คลิก \"+ บันทึกใหม่\" ที่มุมขวาบน", "home"),
@@ -201,7 +219,26 @@ STEPS = [  # spec 3.1, in order: (kind, text, picture or None)
              "และส่งเฉพาะไฟล์ที่ส่งออก อย่าส่งทั้งโฟลเดอร์ StepCap เพราะมีภาพต้นฉบับก่อนเบลอ", None),
     ("note", "รู้ไว้ว่ามี: เมนู Page ใช้รวมหลายคู่มือเป็นเอกสารเดียว · ถังขยะกู้คู่มือที่ลบได้ · "
              "ตั้งค่ามีที่เก็บไฟล์ ปุ่มลัด และปุ่มแสดงคำแนะนำอีกครั้ง", None),
-]
+], "en": [  # the same guide in English
+    ("note", "This guide was made with StepCap itself. Click Edit to try changing its text or pictures, or export it. "
+             "Delete it from the card's … menu when you no longer need it.", None),
+    ("click", "Click \"+ New recording\" at the top right", "home"),
+    ("click", "Choose the screen to record, then click \"Start recording\"", "recmenu"),
+    ("image", "Work in the program you are teaching as usual. The StepCap window gets out of the way, and every click "
+              "and keystroke shows in the panel at the bottom right. Click \"Pause\" or press Ctrl+Alt+P for anything "
+              "you don't want recorded.", "panel"),
+    ("click", "Click \"Stop recording\" on the panel (or press Ctrl+Alt+R). The guide opens for editing straight away.",
+     "panel_stop"),
+    ("image", "Change each step's text in its box, delete steps you don't need with the bin icon, and reorder them "
+              "with the up and down buttons.", "edit"),
+    ("click", "Click \"Edit picture\" to add arrows, boxes and text, blur details, or crop the picture.", "edit_ed"),
+    ("click", "Click \"Export\", choose Word, PDF, HTML or Markdown, then choose where to save the file.", "export"),
+    ("note", "⚠ Before sending it to anyone: check every picture again. Automatic blurring reads English letters and "
+             "numbers only. Send only the exported file, never the whole StepCap folder: it holds the original "
+             "pictures from before blurring.", None),
+    ("note", "Good to know: Pages combine several guides into one document · Trash restores deleted guides · "
+             "Settings has the storage folder, the shortcuts and a button to show the tips again.", None),
+]}[LANG]
 
 
 def app_icon() -> Image.Image:
@@ -223,7 +260,7 @@ def capture(base: str, leave_id: str) -> dict:
     wait_js(w, "!document.getElementById('recmenu').hidden && document.querySelector('#recmenu .mon')")
     # the real monitor list would show this machine's screens
     w.evaluate_js("document.querySelectorAll('#recmenu .mon span:not(.ck)').forEach((s, i) =>"
-                  " s.textContent = i ? 'จอ 2 · 1920×1080' : 'จอ 1 · 1920×1080 · จอหลัก');"
+                  f" s.textContent = i ? '{tr('จอ {n}', n=2)} · 1920×1080' : '{tr('จอ {n}', n=1)} · 1920×1080 · {tr('จอหลัก')}');"
                   "[...document.querySelectorAll('#recmenu .mon')].slice(2).forEach(m => m.remove());"
                   "document.activeElement.blur(); 1")
     shots["recmenu"] = (shoot(w), center(w, "#startrec"))
@@ -273,7 +310,7 @@ def write(shots: dict):
                 s["markers"] = [marker]
         steps.append(s)
     (OUT / "guide.json").write_text(json.dumps(
-        {"id": "getting-started", "title": library.SAMPLE_TITLES["th"], "created": "2026-10-16T09:00:00",
+        {"id": "getting-started", "title": library.SAMPLE_TITLES[LANG], "created": "2026-10-16T09:00:00",
          "updated": "2026-10-16T09:00:00", "bookmarked": False, "app": "StepCap",
          "app_icon": "app_icon.png", "settings": dict(library.DEFAULT_SETTINGS), "steps": steps},
         ensure_ascii=False, indent=2), encoding="utf-8")

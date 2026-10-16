@@ -560,11 +560,18 @@ def test_add_sample_never_touches_a_taken_folder():
 
 
 def test_repo_sample_guide():
+    for lang, folder in (("th", "getting-started"), ("en", "getting-started-en")):
+        _check_repo_sample(lang, Path(__file__).parent / "samples" / folder)
+
+
+def _check_repo_sample(lang, src):
+    import re
     from PIL import Image
     from library import SAMPLE_TITLES, image_kind, read_guide
-    src = Path(__file__).parent / "samples" / "getting-started"
     g = read_guide(src)
-    assert g and g["title"] == SAMPLE_TITLES["th"] and "redact_pending" not in g
+    assert g and g["title"] == SAMPLE_TITLES[lang] and "redact_pending" not in g, (lang, g and g["title"])
+    if lang == "en":
+        assert not [s["text"] for s in g["steps"] if re.search("[฀-๿]", s["text"])]
     kinds = [s["kind"] for s in g["steps"]]
     assert kinds.count("note") == 3 and len(kinds) == 10, kinds
     for s in g["steps"]:

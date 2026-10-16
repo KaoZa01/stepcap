@@ -43,7 +43,8 @@ STORAGE = default_storage()
 STORAGE.mkdir(parents=True, exist_ok=True)
 RUN_FILE = STORAGE / "_run.json"   # port + token, so a second launch can poke us
 ICON_FILE = STORAGE / "_app.ico"
-SAMPLE_DIR = HERE / "samples" / "getting-started"  # copied in as the sample guide
+SAMPLE_DIRS = {"th": HERE / "samples" / "getting-started",  # copied in as the sample guide
+               "en": HERE / "samples" / "getting-started-en"}  # (in the language set then)
 
 user32 = recorder.user32
 kernel32 = recorder.kernel32
@@ -260,7 +261,7 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/trash/empty":
             return self._json({"purged": library.empty_trash(STORAGE, recycle)})
         if p == "/api/sample":
-            gid = library.add_sample(STORAGE, SAMPLE_DIR)
+            gid = library.add_sample(STORAGE, SAMPLE_DIRS[i18n.LANG])
             return self._json({"id": gid}) if gid else self._send(500, "no sample", "text/plain")
         if p == "/api/pages":
             data = _obj(body)
@@ -958,7 +959,7 @@ def main():
     except Exception:
         pass
     try:  # first launch: the sample guide; never a reason not to start
-        library.ensure_sample(STORAGE, SAMPLE_DIR)
+        library.ensure_sample(STORAGE, SAMPLE_DIRS[i18n.LANG])
     except Exception:
         pass
 

@@ -472,6 +472,12 @@ def test_sample_route_and_settings():
         assert titles() == n + 1
     else:
         assert post("/api/sample") == 500
+    try:
+        post("/api/settings", {"lang": "en"})
+        gid = post("/api/sample")["id"]
+        assert get(f"/api/guide/{gid}")["title"] == library.SAMPLE_TITLES["en"]
+    finally:
+        post("/api/settings", {"lang": "th"})
     post("/api/settings", {"tours_seen": ["home"]})
     assert get("/api/settings")["tours_seen"] == ["home"]
     assert post("/api/settings", {"tours_seen": ["bogus"]}) == 400
