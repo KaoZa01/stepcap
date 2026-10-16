@@ -133,10 +133,10 @@ def seed(st: Path):
             encoding="utf-8")
 
 
-def launch():
+def launch(seed_fn=seed):
     st = Path(tempfile.mkdtemp(prefix="stepcap-render-"))
     CTX["storage"] = st
-    seed(st)
+    seed_fn(st)
     CTX["proc"] = subprocess.Popen(
         [sys.executable, "app.py"], cwd=HERE,
         env={**os.environ, "STEPCAP_STORAGE": str(st)},
