@@ -169,7 +169,8 @@ function redactCover(r) {
 document.addEventListener("visibilitychange", () => { if (!document.hidden && TICK) TICK(); });
 
 function boot() {
-  const gid = Q.get("guide");
+  const gid = Q.get("guide"), pid = Q.get("pg");
   if (gid) guidePage(gid, Q.get("mode") === "edit" ? "edit" : "view");
+  else if (pid) pageDocPage(pid, Q.get("mode") === "edit" ? "edit" : "view");
   else shellPage(Q.get("page") || "home");
 }

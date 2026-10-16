@@ -5,6 +5,7 @@
 const PAGES = {
   home: {name: "Home", icon: "home", render: renderHome},
   all: {name: "คู่มือทั้งหมด", icon: "docs", render: renderAll},
+  pages: {name: "Pages", icon: "page", render: renderPages},
   trash: {name: "ถังขยะ", icon: "trash", render: renderTrash},
   settings: {name: "ตั้งค่า", icon: "settings", render: renderSettings},
 };

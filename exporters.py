@@ -86,6 +86,8 @@ def build_markdown(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     meta = meta_line(guide)
     if meta:
         lines += [meta, ""]
+    if guide.get("description"):  # a page's
+        lines += [md_escape(guide["description"]), ""]
     toc = (guide.get("settings") or {}).get("toc")
     if toc and secs:  # a page: its guides and text blocks
         lines += ["**สารบัญ**", ""]
@@ -195,6 +197,8 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     meta = meta_line(guide)
     if meta:
         doc.add_paragraph(meta)
+    if guide.get("description"):  # a page's
+        doc.add_paragraph(guide["description"])
     if (guide.get("settings") or {}).get("toc") and (secs or any(n for n, _ in steps)):
         _run(doc.add_paragraph(), "สารบัญ", bold=True)
         for n, s in steps:

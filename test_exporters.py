@@ -105,6 +105,13 @@ def test_md_sections_images_unique():
     assert md.startswith("# เริ่มงาน\n\n2 คู่มือ · สร้างเมื่อ"), md
 
 
+def test_page_description_exported():
+    from exporters import build_docx
+    doc = {**PAGE_DOC, "description": "สำหรับพนักงานใหม่"}
+    assert "สำหรับพนักงานใหม่" in _zip(build_markdown(doc, {}))["เริ่มงาน.md"].decode("utf-8")
+    assert "สำหรับพนักงานใหม่" in [p.text for p in _doc(build_docx(doc, {})).paragraphs]
+
+
 def test_docx_sections():
     from exporters import build_docx
     d = _doc(build_docx(PAGE_DOC, {}))

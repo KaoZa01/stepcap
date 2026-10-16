@@ -463,6 +463,7 @@ def compile_page(page: dict, guides: dict[str, dict | None]) -> tuple[dict, int]
         steps.append({**sec, "text": g.get("title", ""), "gid": gid})
         steps += [{**st, "id": f"{gid}.{st.get('id')}", "gid": gid} for st in g.get("steps") or []]
     doc = {"id": page.get("id"), "title": page.get("title", ""),
+           "description": page.get("description", ""),
            "created": page.get("created", ""), "updated": page.get("updated", ""),
            "settings": {**settings, "step_count": False}, "steps": steps}
     if settings.get("step_count"):

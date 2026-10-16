@@ -102,6 +102,7 @@ async function renderGuide(guide, root) {
   if (S.updated && fmt(guide.updated)) meta.push("แก้ไขล่าสุด " + fmt(guide.updated));
   let html = '<div class="rg-wrap"><h1>' + E(guide.title) + "</h1>";
   if (meta.length) html += '<div class="rg-meta">' + meta.map(E).join(" · ") + "</div>";
+  if (guide.description) html += '<p class="rg-desc">' + E(guide.description) + "</p>";  // a page's
   const toc = secs.length ? secs : numbered;
   if (S.toc && toc.length)
     html += '<nav class="rg-toc"><b>สารบัญ</b><ol>' + toc.map(s =>
@@ -203,26 +204,24 @@ function renderStepPng(step, gid) {
 // ponytail: one string with data URLs; past ~400 MB of pictures the JS string
 // limit throws and the export says it failed. Ship pictures as files if a
 // guide ever gets that big (Markdown/Word already send raw blobs).
-async function buildExportHtml(gid, {print = false, failed = []} = {}) {
-  const g = await getJSON("/api/guide/" + encodeURIComponent(gid));
-  const steps = [];
-  let n = 0;
+async function buildExportHtml(gid, {print = false, failed = [], doc = null} = {}) {
+  const g = doc || await getJSON("/api/guide/" + encodeURIComponent(gid));
+  const label = stepLabels(g), steps = [];
   for (const s of g.steps) {
-    const c = {...s};
-    if (s.kind !== "note") n++;
+    const c = {...s}, home = s.gid || gid;  // a page's steps come from several guides
     try {
       if (s.image && isGif(s)) {
-        const res = await api("/img/" + encodeURIComponent(gid) + "/" + encodeURIComponent(s.image));
+        const res = await api("/img/" + encodeURIComponent(home) + "/" + encodeURIComponent(s.image));
         if (!res.ok) throw new Error("gif " + res.status);  // gone: say so, don't embed the 404 text
         c._src = await asDataUrl(await res.blob());
         c._gif = true;
       } else if (s.image) {
-        c._src = await asDataUrl(await renderStepPng(s, gid));
+        c._src = await asDataUrl(await renderStepPng(s, home));
         Object.assign(c, {crop: null, markers: [], annotations: [], redactions: []});
         if (print) c._img = true;
       }
     } catch {  // an unreadable image is exported without its picture
-      failed.push(n);
+      failed.push(label[s.id]);
       delete c._src;
       Object.assign(c, {crop: null, markers: [], annotations: [], redactions: []});
     }
@@ -243,56 +242,71 @@ ${drawStepCanvas}
 const PRINT_CSS = "@page{size:A4;margin:14mm}body{padding:0}" +
   ".rg-step{break-inside:avoid}.rg-step img{max-width:100%;max-height:230mm;width:auto;height:auto}";
 
-// Finished pictures for Markdown and Word: every PNG comes from renderStepPng,
-// so hidden parts are really gone; a GIF is only flagged (the server reads it
-// from the guide folder). Sent as raw blobs after a JSON index -- never one
-// giant base64 string. failed: step numbers whose picture couldn't be drawn.
-async function exportImages(g, gid) {
-  const index = [], blobs = [], failed = [];
-  let n = 0;
+// What a toast calls each step: its number, or "<guide> ขั้นที่ n" on a page
+// (numbers restart after each section there).
+function stepLabels(g) {
+  const out = {};
+  let n = 0, sec = null;
   for (const s of g.steps) {
+    if (s.kind === "section") { n = 0; sec = s.text || ""; continue; }
     if (s.kind === "note") continue;
     n++;
-    if (!s.image) continue;
+    out[s.id] = sec === null ? n : `${sec} ขั้นที่ ${n}`;
+  }
+  return out;
+}
+
+// Finished pictures for Markdown and Word: every PNG comes from renderStepPng,
+// so hidden parts are really gone; a GIF is only flagged (the server reads it
+// from its guide folder). Sent as raw blobs after a JSON index -- never one
+// giant base64 string. failed: labels of steps whose picture couldn't be drawn.
+async function exportImages(g, gid) {
+  const index = [], blobs = [], failed = [], label = stepLabels(g);
+  for (const s of g.steps) {
+    if (s.kind === "note" || s.kind === "section" || !s.image) continue;
     if (isGif(s)) { index.push({id: s.id, ext: "gif"}); continue; }
     try {
-      const b = await renderStepPng(s, gid);
+      const b = await renderStepPng(s, s.gid || gid);
       index.push({id: s.id, ext: "png", size: b.size});
       blobs.push(b);
-    } catch { failed.push(n); }
+    } catch { failed.push(label[s.id]); }
   }
   return {index, blobs, failed};
 }
 
 const EXPORT_FORMATS = [["html", "HTML"], ["pdf", "PDF"], ["md", "Markdown (.zip)"], ["docx", "Word (.docx)"]];
-function exportMenu(anchor, gid) {
-  popMenu(anchor, EXPORT_FORMATS.map(([f, label]) => ({label, run: () => exportGuide(gid, f)})));
+function exportMenu(anchor, id, kind = "guide") {
+  popMenu(anchor, EXPORT_FORMATS.map(([f, label]) => ({label, run: () => exportDoc(kind, id, f)})));
 }
 
-// Builds the file in the page (pictures) and Python (assembly), saved via Save As.
+// A guide, or a page compiled into one document, built in the page (pictures)
+// and Python (assembly), saved via Save As.
 let EXPORTING = false;
-async function exportGuide(gid, format = "html") {
+async function exportDoc(kind, id, format = "html") {
   if (EXPORTING) return;
   EXPORTING = true;
   toast("กำลังส่งออก…", 3600000);  // stays until the result replaces it
-  const failed = [];
+  const base = `/api/${kind}/${encodeURIComponent(id)}`, failed = [];
+  const busy = {error: kind === "page" ? "คู่มือใน Page นี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง"
+    : "คู่มือนี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง"};
   let r;
   try {
+    const src = await api(kind === "page" ? base + "/doc" : base);
+    if (!src.ok) throw src.status === 409 ? busy : new Error(src.status);
+    const doc = await src.json();
     let body, type = "text/html; charset=utf-8";
     if (format === "html" || format === "pdf") {
-      body = await buildExportHtml(gid, {print: format === "pdf", failed});
+      body = await buildExportHtml(id, {print: format === "pdf", failed, doc});
     } else {
-      const x = await exportImages(await getJSON("/api/guide/" + encodeURIComponent(gid)), gid);
+      const x = await exportImages(doc, id);
       failed.push(...x.failed);
       body = new Blob([JSON.stringify({images: x.index}) + "\n", ...x.blobs]);
       type = "application/octet-stream";
     }
-    const res = await api("/api/guide/" + encodeURIComponent(gid) + "/export?format=" + format,
-      {method: "POST", headers: {"Content-Type": type}, body});
-    r = res.ok ? await res.json()
-      : {error: res.status === 409 ? "คู่มือนี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง" : "โปรแกรมตอบกลับผิดพลาด"};
-  } catch {
-    r = {error: "สร้างไฟล์ไม่สำเร็จ"};
+    const res = await api(base + "/export?format=" + format, {method: "POST", headers: {"Content-Type": type}, body});
+    r = res.ok ? await res.json() : res.status === 409 ? busy : {error: "โปรแกรมตอบกลับผิดพลาด"};
+  } catch (e) {
+    r = e === busy ? busy : {error: "สร้างไฟล์ไม่สำเร็จ"};
   } finally {
     EXPORTING = false;
   }
@@ -300,9 +314,10 @@ async function exportGuide(gid, format = "html") {
   if (r.error) return toast("ส่งออกไม่สำเร็จ: " + r.error, 6000);
   if (!r.saved) return;  // cancelled
   failed.push(...(r.missing || []));  // pictures the server couldn't use (e.g. a GIF gone)
-  failed.sort((a, b) => a - b);
-  toast(failed.length ? `บันทึกไฟล์แล้ว แต่ภาพของขั้นที่ ${failed.join(", ")} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ`
-    : "บันทึกไฟล์แล้ว", failed.length ? 8000 : 2500);
+  const notes = [];
+  if (failed.length) notes.push(`ภาพของขั้นที่ ${failed.join(", ")} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ`);
+  if (r.skipped) notes.push(`ข้ามคู่มือที่ถูกลบ ${r.skipped} อัน`);
+  toast(notes.length ? "บันทึกไฟล์แล้ว แต่" + notes.join(" และ") : "บันทึกไฟล์แล้ว", notes.length ? 8000 : 2500);
 }
 
 // ---------------------------------------------------------------- edit mode
@@ -349,7 +364,7 @@ function editPage() {
       <button class="btn" id="exp">${ICON.export} ส่งออก</button>
     </header><div class="gbody edit"><div class="ewrap" id="ewrap"></div></div>
     <div class="etb">
-      <button type="button" class="tb off" aria-disabled="true" data-tip="เพิ่มลงหน้า · เร็วๆ นี้">${ICON.page}</button>
+      <button type="button" class="tb" data-act="addpage" data-tip="เพิ่มลง Page">${ICON.page}</button>
       <button type="button" class="tb" data-pop="click" data-tip="จุดคลิก (สี รูปทรง ขนาด)">${ICON.brush}</button>
       <button type="button" class="tb" data-pop="doc" data-tip="ตั้งค่าเอกสาร">${ICON.sliders}</button>
       <div class="tbpop" id="tbpop" hidden></div>
@@ -361,6 +376,9 @@ function editPage() {
     e.stopPropagation();
     const b = e.currentTarget;
     if (await flush()) exportMenu(b, GID);
+  };
+  document.querySelector('.tb[data-act="addpage"]').onclick = e => {
+    e.stopPropagation(); addToPageMenu(e.currentTarget, GID);
   };
   document.querySelectorAll(".tb[data-pop]").forEach(b => b.onclick = e => {
     e.stopPropagation(); toggleToolPop(b.dataset.pop, b);
