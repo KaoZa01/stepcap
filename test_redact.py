@@ -107,7 +107,7 @@ def test_redact_guide_marks_and_reports():
     (st / "g1").mkdir(parents=True)
     (st / "g1" / "a.png").write_bytes(b"png")
     (st / "g1" / "c.gif").write_bytes(b"gif")
-    guide = {"id": "g1", "steps": [
+    guide = {"id": "g1", "redact_pending": True, "steps": [
         {"id": "s1", "image": "a.png", "redactions": []},
         {"id": "n", "kind": "note", "image": None},          # not an image step
         {"id": "s2", "image": "c.gif", "redactions": []},
@@ -120,7 +120,91 @@ def test_redact_guide_marks_and_reports():
     assert guide["steps"][0]["redactions"] == [rect]
     disk = json.loads((st / "g1" / "guide.json").read_text(encoding="utf-8"))
     assert disk["steps"][0]["redactions"] == [rect]
+    assert "redact_pending" not in disk
     assert seen[-1] == (3, 3), seen
+
+
+def _app():
+    """app.py in this process, on its own temp storage (never the real one)."""
+    import os
+    st = TMP / "appstore"
+    st.mkdir(exist_ok=True)
+    os.environ["STEPCAP_STORAGE"] = str(st)
+    import app
+    assert app.STORAGE == st
+    return app
+
+
+def _pending_guide(st, gid):
+    import json
+    (st / gid).mkdir()
+    (st / gid / "p.png").write_bytes(_text_png("mail someone@example.com", (640, 80)).read_bytes())
+    g = {"id": gid, "title": "t", "created": "2026-10-16T10:00:00", "redact_pending": True,
+         "steps": [{"id": "s1", "kind": "click", "text": "x", "image": "p.png", "redactions": []}]}
+    (st / gid / "guide.json").write_text(json.dumps(g), encoding="utf-8")
+    return g
+
+
+def test_stop_gates_guide_until_redacted():
+    import threading
+    app = _app()
+    gate, started = threading.Event(), threading.Event()
+    real = app.redact.redact_guide
+
+    def slow(*a, **k):
+        started.set()
+        gate.wait(10)
+        return real(*a, **k)
+    g = _pending_guide(app.STORAGE, "gstop")
+    app.REC = type("R", (), {"stop_recording": lambda self: dict(g), "monitors": [],
+                             "recording": False, "paused": False, "selected": 0,
+                             "hooks_ok": True, "hook_error": 0, "live": lambda self: {}})()
+    app.OV = type("O", (), {"hide_panel": lambda self: None})()
+    app.main_hwnd = lambda: None
+    app.recorder.set_capture_excluded = lambda h, on: True
+    app.redact.redact_guide = slow
+    try:
+        seq = app.GUIDE_SEQ
+        app.stop_rec_ui()
+        assert started.wait(10)
+        assert app.guide_for_page("gstop") == 409       # page must wait
+        assert app.rec_status()["redacting"] is not None
+        assert app.GUIDE_SEQ == seq                      # not opened yet
+        gate.set()
+        for _ in range(100):
+            if app.GUIDE_SEQ != seq:
+                break
+            threading.Event().wait(0.1)
+        assert app.GUIDE_SEQ == seq + 1 and app.LAST_GUIDE == "gstop"
+        got = app.guide_for_page("gstop")
+        assert len(got["steps"][0]["redactions"]) == 1 and "redact_pending" not in got, got
+        assert app.rec_status()["redacting"] is None
+    finally:
+        app.redact.redact_guide = real
+
+
+def test_pending_guide_redacted_when_opened():
+    # the app quit mid-pass: opening the guide finishes the job first
+    app = _app()
+    _pending_guide(app.STORAGE, "gquit")
+    got = app.guide_for_page("gquit")
+    assert len(got["steps"][0]["redactions"]) == 1 and "redact_pending" not in got, got
+
+
+def test_unchecked_guide_warns_until_checked():
+    app = _app()
+    _pending_guide(app.STORAGE, "gnote")
+    real = app.redact.available
+    app.redact.available = lambda: "ไม่มี OCR ภาษาอังกฤษในเครื่อง"
+    try:
+        for _ in range(2):  # still unchecked: says so on every open
+            got = app.guide_for_page("gnote")
+            assert "ไม่มี OCR" in got["redact_note"] and got["redact_pending"], got
+    finally:
+        app.redact.available = real
+    got = app.guide_for_page("gnote")  # OCR back: checked, blurred, quiet
+    assert "redact_note" not in got and "redact_pending" not in got, got
+    assert len(got["steps"][0]["redactions"]) == 1
 
 
 def test_available():

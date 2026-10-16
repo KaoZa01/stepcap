@@ -133,15 +133,23 @@ async function renderGuide(guide, root) {
 async function guidePage(id, mode) {
   GID = id;
   try {
-    const r = await api("/api/guide/" + encodeURIComponent(id));
+    let r;
+    while ((r = await api("/api/guide/" + encodeURIComponent(id))).status === 409) {
+      COVER_HOLD = true;
+      redactCover([0, 0]);  // its auto-redaction pass is still running
+      await new Promise(res => setTimeout(res, 500));
+    }
+    if (COVER_HOLD) { COVER_HOLD = false; redactCover(null); }
     if (!r.ok) throw new Error(r.status);
     STATE = await r.json();
   } catch {
     return nav({page: "home"});
   }
   document.title = "StepCap - " + STATE.title;
+  const note = STATE.redact_note;  // what auto-redaction could not cover; never saved back
+  delete STATE.redact_note;
   if (mode === "edit") editPage(); else viewPage();
-  if (Q.get("note")) toast(Q.get("note"), 8000);  // what auto-redaction could not cover
+  if (note) toast(note, 8000);
 }
 
 function viewPage() {

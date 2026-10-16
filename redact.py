@@ -155,6 +155,8 @@ def available() -> str | None:
         return None
     except RedactError as e:
         return str(e)
+    except Exception:  # COM / OS errors from WinRT
+        return "เปิดตัวอ่านตัวอักษรไม่ได้"
 
 
 def ocr_lines(path: Path) -> list[list[tuple[str, tuple[float, float, float, float]]]]:
@@ -231,5 +233,6 @@ def redact_guide(storage: Path, guide: dict, rules: Iterable[str], custom: Itera
                 failed.append(num)
         if progress:
             progress(i, len(todo))
+    guide.pop("redact_pending", None)  # checked: opening it no longer re-runs the pass
     library.write_json_atomic(folder / "guide.json", guide)
     return failed

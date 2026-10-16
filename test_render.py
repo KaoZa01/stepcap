@@ -461,11 +461,24 @@ def test_settings_page_redact():
 
 
 def test_redact_cover_and_note():
-    page("guide=noise&mode=edit&note=" + "ซ่อนข้อมูลไม่สำเร็จ%201%20ภาพ")
-    assert "ซ่อนข้อมูลไม่สำเร็จ 1 ภาพ" in js("return document.querySelector('.toast')?.textContent;")
-    assert js("redactCover([2, 5]); return document.getElementById('redcover').textContent;") \
-        == "กำลังซ่อนข้อมูล… 2/5"
-    assert js("redactCover(null); return document.getElementById('redcover');") is None
+    page("guide=noise&mode=edit")
+    assert js("redactCover([2, 5]); return [document.getElementById('redcover').textContent,"
+              " document.getElementById('app').inert];") == ["กำลังซ่อนข้อมูล… 2/5", True]
+    assert js("redactCover(null); return [document.getElementById('redcover'),"
+              " document.getElementById('app').inert];") == [None, False]
+    # the guide answers 409 twice (pass running), then comes with a note
+    got = js("const f = window.fetch; let n = 0, covered = false;"
+             "window.fetch = async (u, o) => {"
+             "  if (String(u).startsWith('/api/guide/noise?')) {"
+             "    if (n++ < 2) { covered = covered || !!document.getElementById('redcover');"
+             "                   return new Response('redacting', {status: 409}); }"
+             "    const j = await (await f(u, o)).json(); j.redact_note = 'NOTE-X';"
+             "    return new Response(JSON.stringify(j)); }"
+             "  return f(u, o); };"
+             "await guidePage('noise', 'edit'); window.fetch = f;"
+             "return [n, covered, STATE.redact_note === undefined,"
+             " [...document.querySelectorAll('.toast')].some(t => t.textContent === 'NOTE-X')];")
+    assert got == [3, True, True, True], got
 
 
 _WAIT = ("const until = async f => { for (let i = 0; i < 150 && !f(); i++)"

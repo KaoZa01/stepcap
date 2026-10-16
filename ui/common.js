@@ -135,28 +135,33 @@ function startStatusPoll(onStatus, ms, beforeLeave) {
     let st;
     try { st = await getJSON("/api/status"); } catch { return; }
     onStatus(st);
-    redactCover(st.redacting);
+    if (!COVER_HOLD) redactCover(st.redacting);
     if (SEQ === null) { SEQ = st.guide_seq; return; }
     if (st.guide_seq !== SEQ && st.last_guide) {
       SEQ = st.guide_seq;
       clearInterval(POLL);
       if (beforeLeave && (await beforeLeave()) === false) return;  // keep unsaved edits
-      nav({guide: st.last_guide, mode: "edit", ...(st.redact_note ? {note: st.redact_note} : {})});
+      goGuide(st.last_guide, "edit");
     }
   };
   clearInterval(POLL);
   TICK();
   POLL = setInterval(TICK, ms);
 }
-// While a new recording is auto-redacted the whole window is covered: the
-// guide must not be opened or exported before its blurs are in.
+// While a recording is auto-redacted the window is covered and inert (the
+// server also refuses that guide until its blurs are in).
+let COVER_HOLD = false;  // a guide page waiting on its pass owns the cover
 function redactCover(r) {
   let c = document.getElementById("redcover");
-  if (!r) { c?.remove(); return; }
+  const inert = on => { for (const el of document.body.children)
+    if (el !== c && !el.classList.contains("toast")) el.inert = on; };
+  if (!r) { if (c) { c.remove(); c = null; inert(false); } return; }
   if (!c) {
+    document.activeElement?.blur?.();
     c = document.createElement("div");
     c.id = "redcover";
     document.body.appendChild(c);
+    inert(true);
   }
   c.textContent = r[1] ? `กำลังซ่อนข้อมูล… ${r[0]}/${r[1]}` : "กำลังซ่อนข้อมูล…";
 }

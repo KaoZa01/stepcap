@@ -513,6 +513,7 @@ class Recorder:
                 _discard(str(f))
             cfg = library.load_settings(self.storage)
             mask = None
+            self._redact_on = cfg["redact_on"]
             if cfg["redact_on"]:
                 import redact
                 rules, custom = cfg["redact_rules"], cfg["redact_custom"]
@@ -592,6 +593,9 @@ class Recorder:
             "settings": dict(library.DEFAULT_SETTINGS),
             "steps": steps,
         }
+        if getattr(self, "_redact_on", False):
+            # cleared by redact.redact_guide; until then the app won't show it
+            guide["redact_pending"] = True
         library.write_json_atomic(folder / "guide.json", guide)
         return guide
 

@@ -165,10 +165,10 @@ class Handler(BaseHTTPRequestHandler):
                                "redact_error": redact.available()})
         m = _GUIDE_RE.fullmatch(p)
         if m and not m.group(2):
-            gid = unquote(m.group(1))
-            g = library.read_guide(STORAGE / gid) if library.safe_id(gid) \
-                else None
-            return self._json(g) if g is not None else self._missing()
+            g = guide_for_page(unquote(m.group(1)))
+            if g == 409:
+                return self._send(409, "redacting", "text/plain")
+            return self._json(g) if isinstance(g, dict) else self._missing()
         if p.startswith("/img/"):
             parts = [unquote(x) for x in p[len("/img/"):].split("/", 1)]
             if len(parts) == 2 and library.safe_id(parts[0]) \
@@ -233,6 +233,8 @@ class Handler(BaseHTTPRequestHandler):
         gid, action = unquote(m.group(1)), m.group(2)
         if not library.safe_id(gid) or not (STORAGE / gid).is_dir():
             return self._missing()
+        if gid in REDACT_BUSY:  # its auto-redaction pass is still writing it
+            return self._send(409, "redacting", "text/plain")
         if action == "delete":
             ok = library.trash_guide(STORAGE, gid)
             return self._json({}) if ok else self._send(409, "conflict",
@@ -294,8 +296,11 @@ PORT = 0
 refresh_state = lambda: None
 GUIDE_SEQ = 0          # bumps on every stop that produced a guide
 LAST_GUIDE = None      # id of that guide; open pages navigate to it
-REDACTING = None       # [done, total] while a new guide is being auto-redacted
-REDACT_NOTE = None     # what the new guide's page says about that pass, if anything
+# Auto-redaction gate: a guide whose pass is running answers 409 on every
+# route, so nothing can open, save or export it before its blurs are in.
+REDACT_LOCK = threading.Lock()
+REDACT_BUSY: dict[str, list[int]] = {}  # gid -> [done, total]
+REDACT_NOTES: dict[str, str] = {}       # gid -> what its page says next time it opens
 _HWND = None
 _MUTEX = None
 
@@ -341,21 +346,16 @@ def start_rec_ui():
 
 
 def stop_rec_ui():
-    global REDACTING
     guide = REC.stop_recording()
     OV.hide_panel()
     h = main_hwnd()
     recorder.set_capture_excluded(h, False)
     if guide:
-        cfg = library.load_settings(STORAGE)
-        if cfg["redact_on"]:
-            # the guide only opens once its images are checked, so nothing
-            # can be exported before the blurs are in
-            REDACTING = [0, 0]
-            threading.Thread(target=_redact_then_open, args=(guide, cfg),
+        if guide.get("redact_pending") and _claim(guide["id"]):
+            threading.Thread(target=_redact_then_open, args=(guide,),
                              daemon=True).start()
         else:
-            _open_new(guide, None)
+            _open_new(guide)
         show_main()
     elif h and user32.IsWindowVisible(h) and user32.IsIconic(h):
         user32.ShowWindowAsync(h, recorder.SW_RESTORE)
@@ -363,34 +363,71 @@ def stop_rec_ui():
     return guide
 
 
-def _redact_then_open(guide: dict, cfg: dict):
-    global REDACTING
-    note = None
-    err = redact.available()
-    if err:
-        note = f"ไม่ได้ซ่อนข้อมูลอัตโนมัติ: {err}"
-    else:
-        def progress(done, total):
-            global REDACTING
-            REDACTING = [done, total]
-        try:
-            failed = redact.redact_guide(STORAGE, guide, cfg["redact_rules"],
-                                         cfg["redact_custom"], progress)
+def _claim(gid: str) -> bool:
+    with REDACT_LOCK:
+        if gid in REDACT_BUSY:
+            return False
+        REDACT_BUSY[gid] = [0, 0]
+        return True
+
+
+def _redact_pass(guide: dict):
+    """Run a claimed guide's pass, leave a note for its page, release it.
+    A guide that could not be checked at all stays redact_pending, so the
+    next open tries again (and warns again)."""
+    gid, note = guide["id"], None
+    try:
+        err = redact.available()
+        if err:
+            note = f"ไม่ได้ซ่อนข้อมูลอัตโนมัติ: {err} ตรวจภาพเองก่อนส่ง"
+        else:
+            cfg = library.load_settings(STORAGE)
+            failed = redact.redact_guide(
+                STORAGE, guide, cfg["redact_rules"], cfg["redact_custom"],
+                lambda done, total: REDACT_BUSY.__setitem__(gid, [done, total]))
             if failed:
                 note = (f"ซ่อนข้อมูลไม่สำเร็จ {len(failed)} ภาพ (ขั้นที่ "
                         f"{', '.join(map(str, failed))}) ตรวจเองก่อนส่ง")
-        except Exception:
-            note = "ซ่อนข้อมูลอัตโนมัติไม่สำเร็จ ตรวจภาพเองก่อนส่ง"
-    REDACTING = None
-    _open_new(guide, note)
+    except Exception:
+        note = "ซ่อนข้อมูลอัตโนมัติไม่สำเร็จ ตรวจภาพเองก่อนส่ง"
+    finally:
+        if note:
+            REDACT_NOTES[gid] = note
+        with REDACT_LOCK:
+            REDACT_BUSY.pop(gid, None)
 
 
-def _open_new(guide: dict, note: str | None):
-    global GUIDE_SEQ, LAST_GUIDE, REDACT_NOTE
+def _redact_then_open(guide: dict):
+    _redact_pass(guide)
+    _open_new(guide)
+
+
+def _open_new(guide: dict):
+    global GUIDE_SEQ, LAST_GUIDE
     # the page sees guide_seq change and opens the new guide in edit mode
-    REDACT_NOTE = note
     LAST_GUIDE, GUIDE_SEQ = guide["id"], GUIDE_SEQ + 1
     refresh_state()
+
+
+def guide_for_page(gid: str) -> dict | int:
+    """GET /api/guide/<id>: 409 while its pass runs; a guide left unchecked
+    (app quit mid-pass) is checked first. Carries its note once."""
+    if not library.safe_id(gid):
+        return 404
+    if gid in REDACT_BUSY:
+        return 409
+    g = library.read_guide(STORAGE / gid)
+    if g is None:
+        return 404
+    if g.get("redact_pending"):
+        if not _claim(gid):
+            return 409
+        _redact_pass(g)
+        g = library.read_guide(STORAGE / gid)
+        if g is None:
+            return 404
+    note = REDACT_NOTES.pop(gid, None)
+    return {**g, "redact_note": note} if note else g
 
 
 def pause_ui():
@@ -432,7 +469,7 @@ def rec_status() -> dict:
             "selected": REC.selected, "monitors": mons,
             "hooks_ok": REC.hooks_ok, "hook_error": REC.hook_error,
             "guide_seq": GUIDE_SEQ, "last_guide": LAST_GUIDE,
-            "redacting": REDACTING, "redact_note": REDACT_NOTE,
+            "redacting": [sum(x) for x in zip(*REDACT_BUSY.values())] or None,
             **REC.live()}
 
 
