@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+import i18n
 import redact
 
 DEFAULT_SETTINGS = {"toc": False, "step_count": False, "created": False,
@@ -23,7 +24,7 @@ DEFAULT_SETTINGS = {"toc": False, "step_count": False, "created": False,
                     "click_size": 44}
 DEFAULT_APP_SETTINGS = {"monitor": None, "view": "grid", "redact_on": True,
                         "redact_rules": list(redact.RULES), "redact_custom": [],
-                        "sample_added": False, "tours_seen": []}
+                        "sample_added": False, "tours_seen": [], "lang": "th"}
 SAMPLE_TITLE = "ตัวอย่าง: เริ่มต้นใช้ StepCap"
 TOURS = ("home", "edit")  # the screens that have a first-time tour
 
@@ -383,6 +384,8 @@ def _clean_settings(d: dict) -> dict:
     for k in ("redact_on", "sample_added"):
         if not isinstance(out.get(k, True), bool):
             del out[k]
+    if out.get("lang", "th") not in i18n.LANGS:
+        del out["lang"]
     if "tours_seen" in out:
         v = out["tours_seen"]
         out["tours_seen"] = [t for t in TOURS if isinstance(v, list) and t in v]
@@ -395,6 +398,25 @@ def _clean_settings(d: dict) -> dict:
     if "redact_custom" in out:
         out["redact_custom"] = [w.strip() for w in out["redact_custom"] if w.strip()]
     return out
+
+
+def ensure_lang(storage: Path, windows_thai: bool) -> str:
+    """The language to start in. Only a fresh storage (no settings.json, no
+    guide) takes it from Windows and saves it; anyone already using StepCap
+    stays Thai until they change it, and an unreadable settings.json is left
+    as it is."""
+    f = storage / "settings.json"
+    if f.exists():
+        try:
+            raw = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return "th"
+        return raw.get("lang") if isinstance(raw, dict) and raw.get("lang") in i18n.LANGS else "th"
+    if storage.is_dir() and any((p / "guide.json").exists() for p in storage.iterdir() if p.is_dir()):
+        return "th"
+    lang = "th" if windows_thai else "en"
+    save_settings(storage, lang=lang)
+    return lang
 
 
 def save_settings(storage: Path, **changes) -> dict:

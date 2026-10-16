@@ -5,6 +5,13 @@
 const Q = new URLSearchParams(location.search);
 const T = Q.get("t");
 
+// Thai text in the current language (LANG and EN come with the page, from
+// ui/en.json); {name} filled from v; a key + "#1" entry is the singular.
+function tr(th, v) {
+  const s = (v?.n === 1 && EN[th + "#1"]) || EN[th] || th;
+  return v ? s.replace(/\{(\w+)\}/g, (m, k) => k in v ? String(v[k]) : m) : s;
+}
+
 const api = (path, opts) =>
   fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(T), opts);
 const post = (path, body) => api(path, {

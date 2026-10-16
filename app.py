@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import webview
 
 import exporters
+import i18n
 import library
 import overlay
 import recorder
@@ -154,8 +155,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._auth(qs):
             return self._send(403, "forbidden", "text/plain")
         if p == "/":
-            html = (HERE / "ui" / "index.html").read_text(encoding="utf-8")
-            return self._send(200, html, "text/html; charset=utf-8")
+            return self._send(200, page_html(), "text/html; charset=utf-8")
         if p == "/api/guides":
             return self._json(library.list_guides(
                 STORAGE, q=qs.get("q", [""])[0],
@@ -245,7 +245,11 @@ class Handler(BaseHTTPRequestHandler):
             data = _obj(body)
             if data is None or not _settings_ok(data):
                 return self._send(400, "bad settings", "text/plain")
-            return self._json(library.save_settings(STORAGE, **data))
+            saved = library.save_settings(STORAGE, **data)
+            if "lang" in data:
+                i18n.set_lang(saved["lang"])
+                refresh_state()  # the tray tooltip
+            return self._json(saved)
         if p == "/api/open-folder":
             os.startfile(STORAGE)
             return self._json({})
@@ -341,6 +345,21 @@ def _obj(body: bytes) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def page_html() -> str:
+    """index.html in the current language: its lang attribute, and the
+    language plus English table for the page's tr() (empty in Thai)."""
+    html = (HERE / "ui" / "index.html").read_text(encoding="utf-8")
+    table = json.dumps(i18n.EN if i18n.LANG == "en" else {}, ensure_ascii=False).replace("<", "\\u003c")
+    script = f'<script>const LANG="{i18n.LANG}", EN={table};</script>'
+    return html.replace('<html lang="th">', f'<html lang="{i18n.LANG}">', 1) \
+               .replace("<!--i18n-->", script, 1)
+
+
+def windows_wants_thai() -> bool:
+    """Windows shows its own screens in Thai (the display language)."""
+    return (ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF) == 0x1E
+
+
 def _settings_ok(d: dict) -> bool:
     """What the pages may change in settings.json; anything else is a 400."""
     strs = lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v)
@@ -348,7 +367,8 @@ def _settings_ok(d: dict) -> bool:
               "redact_on": lambda v: isinstance(v, bool),
               "redact_rules": lambda v: strs(v) and set(v) <= set(redact.RULES),
               "redact_custom": strs,
-              "tours_seen": lambda v: strs(v) and set(v) <= set(library.TOURS)}
+              "tours_seen": lambda v: strs(v) and set(v) <= set(library.TOURS),
+              "lang": lambda v: v in i18n.LANGS}
     return bool(d) and all(k in checks and checks[k](v) for k, v in d.items())
 
 
@@ -928,6 +948,10 @@ def main():
     for f in (STORAGE / "_tmp").glob("print-*"):  # left by a crash mid-PDF
         f.unlink(missing_ok=True)
     ensure_app_icon(ICON_FILE)
+    try:  # before the sample: a fresh storage picks its language from Windows
+        i18n.set_lang(library.ensure_lang(STORAGE, windows_wants_thai()))
+    except Exception:
+        pass
     try:  # first launch: the sample guide; never a reason not to start
         library.ensure_sample(STORAGE, SAMPLE_DIR)
     except Exception:

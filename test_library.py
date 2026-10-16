@@ -584,6 +584,47 @@ def test_onboarding_settings_cleaned():
         assert L.load_settings(st)["sample_added"] is False
 
 
+def test_ensure_lang_fresh_storage():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        assert L.ensure_lang(Path(d) / "a", True) == "th"
+        st = Path(d) / "b"
+        assert L.ensure_lang(st, False) == "en"
+        assert L.load_settings(st)["lang"] == "en"
+
+
+def test_ensure_lang_existing_user():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        (st / "g1").mkdir()
+        (st / "g1" / "guide.json").write_text("{}", encoding="utf-8")
+        assert L.ensure_lang(st, False) == "th"
+        assert not (st / "settings.json").exists()
+    for raw, want in (({"view": "list"}, "th"), ({"lang": "en"}, "en")):
+        with tempfile.TemporaryDirectory() as d:
+            st = Path(d)
+            (st / "settings.json").write_text(json.dumps(raw), encoding="utf-8")
+            assert L.ensure_lang(st, False) == want
+
+
+def test_ensure_lang_corrupt_settings():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        (st / "settings.json").write_bytes(b'{"vi')
+        assert L.ensure_lang(st, False) == "th"
+        assert (st / "settings.json").read_bytes() == b'{"vi'
+
+
+def test_lang_setting_cleaned():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        assert L.save_settings(st, lang="fr")["lang"] == "th"
+        assert L.save_settings(st, lang="en")["lang"] == "en"
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

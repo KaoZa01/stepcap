@@ -478,9 +478,21 @@ def test_sample_route_and_settings():
     assert post("/api/settings", {"sample_added": False}) == 400
 
 
+def test_lang_route():
+    assert post("/api/settings", {"lang": "fr"}) == 400
+    try:
+        post("/api/settings", {"lang": "en"})
+        assert get("/api/settings")["lang"] == "en"
+        code, html = raw("/")
+        assert code == 200 and '<html lang="en">' in html and 'const LANG="en"' in html, html[:200]
+    finally:
+        post("/api/settings", {"lang": "th"})
+    assert '<html lang="th">' in raw("/")[1]
+
+
 TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
-         test_library_routes, test_sample_route_and_settings, test_redact_settings_route, test_redact_route,
+         test_library_routes, test_sample_route_and_settings, test_redact_settings_route, test_redact_route, test_lang_route,
          test_ui_served, test_export_save_as,
          test_upload_and_content_types, test_download_save_as, test_export_pdf,
          test_export_md_and_docx, test_page_routes, test_page_export_md,
