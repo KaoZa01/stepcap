@@ -61,17 +61,20 @@ def selfcheck(exe: Path) -> dict:
 
 
 def iscc() -> Path | None:
-    for base in (os.environ.get("LOCALAPPDATA", ""), os.environ.get("ProgramFiles(x86)", ""),
-                 os.environ.get("ProgramFiles", "")):
-        f = Path(base) / "Programs" / "Inno Setup 6" / "ISCC.exe" if base == os.environ.get("LOCALAPPDATA") \
-            else Path(base) / "Inno Setup 6" / "ISCC.exe"
-        if base and f.is_file():
+    """Inno Setup's compiler: a per-user winget install, or a machine-wide one."""
+    env = os.environ.get
+    for f in (Path(env("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe",
+              Path(env("ProgramFiles(x86)", "")) / "Inno Setup 6" / "ISCC.exe",
+              Path(env("ProgramFiles", "")) / "Inno Setup 6" / "ISCC.exe"):
+        if f.is_file():
             return f
     return None
 
 
 def installer() -> Path:
-    raise NotImplementedError  # Task 3
+    """dist/StepCap-Setup-<version>.exe from dist/StepCap/ (installer/StepCap.iss)."""
+    subprocess.run([str(iscc()), f"/DMyVersion={VERSION}", str(HERE / "installer" / "StepCap.iss")], check=True)
+    return DIST / f"StepCap-Setup-{VERSION}.exe"
 
 
 if __name__ == "__main__":
