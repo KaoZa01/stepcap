@@ -957,6 +957,23 @@ def test_language_switch():
     assert got == ["th", "หน้าแรก"], got
 
 
+def test_english_guide_labels():
+    page("guide=noise&mode=view")
+    js("await post('/api/settings', {lang: 'en'});")
+    try:
+        page("guide=noise&mode=view")
+        doc = {"steps": [{"id": "s0", "kind": "section", "text": "A"},
+                         {"id": "a", "kind": "click"}, {"id": "b", "kind": "image"},
+                         {"id": "s1", "kind": "section", "text": "B"}, {"id": "c", "kind": "click"}]}
+        got = js("const h = await buildExportHtml(GID);"
+                 f"const d = {json.dumps(doc)};"
+                 "return [h.includes('<html lang=\"en\">'), stepLabels(d).a,"
+                 " byDocOrder(['B step 1', 'A step 2', 'A step 1'], d)];")
+        assert got == [True, "A step 1", ["A step 1", "A step 2", "B step 1"]], got
+    finally:
+        js("await post('/api/settings', {lang: 'th'});")
+
+
 def test_tour_gives_way_to_recording_and_cover():
     # an open tour must not cover the stop buttons or sit on the redaction cover
     page("page=home")
@@ -1057,7 +1074,7 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_step_reorder_buttons_and_note, test_editor_is_modal_and_esc_closes,
          test_done_when_save_fails_asks, test_page_save_failure_warns_once,
          test_broken_guide_listed_and_open_says_why, test_sidebar_and_cards_keyboard,
-         test_home_has_no_first_run_list, test_home_tour_first_time_only, test_language_switch,
+         test_home_has_no_first_run_list, test_home_tour_first_time_only, test_language_switch, test_english_guide_labels,
          test_home_tour_skips_missing_sample_and_follows_resize, test_tour_postponed,
          test_settings_replay, test_edit_tour_stops_and_skips, test_tour_esc_only_closes_tour,
          test_settings_add_sample, test_tour_gives_way_to_recording_and_cover, test_toast_shows_above_tour]
