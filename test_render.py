@@ -422,6 +422,15 @@ def test_colour_picked_before_drawing():
        "ev('pointerdown', 150, 120); ev('pointerup', 150, 120);")
     got = js("return IED.step.markers.slice(-2).map(m => m.color);")
     assert got == ["#EF4444", "#3B82F6"], got
+    # the user's steps: green box, click elsewhere, purple, second box
+    js(_PTR + "document.querySelector('.ied [data-tool=box]').click();"
+       "document.querySelector('.ied-opts [data-c=\"#22C55E\"]').click();"
+       "ev('pointerdown', 20, 20); ev('pointermove', 80, 60); ev('pointerup', 80, 60);"
+       "ev('pointerdown', 250, 150); ev('pointerup', 250, 150);"
+       "document.querySelector('.ied-opts [data-c=\"#A855F7\"]').click();"
+       "ev('pointerdown', 120, 100); ev('pointermove', 200, 160); ev('pointerup', 200, 160);")
+    got = js("return IED.step.annotations.slice(-2).map(a => a.type + a.color);")
+    assert got == ["box#22C55E", "box#A855F7"], got
     js("closeImageEditor();")
 
 
