@@ -423,6 +423,7 @@ function editPage() {
     addImageStep(item.getAsFile());
   });
   renderSteps();
+  maybeTour("edit");
   startStatusPoll(() => {}, 1000, flush);
 }
 

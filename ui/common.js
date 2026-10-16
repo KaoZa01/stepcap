@@ -76,8 +76,9 @@ const LOGO = `<svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"
 
 // ---------------------------------------------------------------- navigation
 // msg: a toast for the next page (a page that couldn't open says why, there)
-const NAV_MSG = {guide: "เปิดคู่มือนี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว",
-                 page: "เปิด Page นี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว"};
+const NAV_MSG = {guide: ["เปิดคู่มือนี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว", "err"],
+                 page: ["เปิด Page นี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว", "err"],
+                 sample: ["เพิ่มคู่มือตัวอย่างแล้ว", "ok"]};
 function nav(params) {
   location.search = "?" + new URLSearchParams({t: T, ...params}).toString();
 }
@@ -215,6 +216,7 @@ function startStatusPoll(onStatus, ms, beforeLeave) {
   TICK = async () => {
     let st;
     try { st = await getJSON("/api/status"); } catch { return; }
+    if (st.recording && typeof TOUR_ABORT === "function") TOUR_ABORT();  // ui/tour.js
     onStatus(st);
     if (!COVER_HOLD) redactCover(st.redacting);
     if (SEQ === null) { SEQ = st.guide_seq; return; }
@@ -239,6 +241,7 @@ function redactCover(r) {
     if (el !== c && el.id !== "toasts")
       el.inert = on || (el.id === "app" && typeof IED !== "undefined" && IED.open); };
   if (!r) { if (c) { c.remove(); c = null; inert(false); } return; }
+  if (typeof TOUR_ABORT === "function") TOUR_ABORT();  // the cover owns the window
   if (!c) {
     document.activeElement?.blur?.();
     c = document.createElement("div");
@@ -253,7 +256,8 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && TI
 
 function boot() {
   const gid = Q.get("guide"), pid = Q.get("pg");
-  if (NAV_MSG[Q.get("msg")]) toastErr(NAV_MSG[Q.get("msg")], 8000);
+  const msg = NAV_MSG[Q.get("msg")];
+  if (msg) (msg[1] === "err" ? toastErr : toast)(msg[0], 8000);
   if (gid) guidePage(gid, Q.get("mode") === "edit" ? "edit" : "view");
   else if (pid) pageDocPage(pid, Q.get("mode") === "edit" ? "edit" : "view");
   else shellPage(Q.get("page") || "home");

@@ -22,7 +22,10 @@ DEFAULT_SETTINGS = {"toc": False, "step_count": False, "created": False,
                     "click_color": "#FB923C", "click_shape": "circle",
                     "click_size": 44}
 DEFAULT_APP_SETTINGS = {"monitor": None, "view": "grid", "redact_on": True,
-                        "redact_rules": list(redact.RULES), "redact_custom": []}
+                        "redact_rules": list(redact.RULES), "redact_custom": [],
+                        "sample_added": False, "tours_seen": []}
+SAMPLE_TITLE = "ตัวอย่าง: เริ่มต้นใช้ StepCap"
+TOURS = ("home", "edit")  # the screens that have a first-time tour
 
 MAX_IMAGE = 25 * 1024 * 1024  # bytes per uploaded image
 IMAGE_MIME = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif"}
@@ -255,6 +258,56 @@ def duplicate_guide(storage: Path, gid: str) -> str | None:
     return new
 
 
+def add_sample(storage: Path, src: Path) -> str | None:
+    """A fresh copy of the sample guide folder src as a new guide, dated now.
+    None (and nothing left behind) when it can't be made."""
+    dst = None
+    try:
+        storage.mkdir(parents=True, exist_ok=True)
+        cand = storage / new_id(storage)
+        cand.mkdir()  # taken meanwhile (a guide made in the same second): raises, nothing of ours to undo
+        dst = cand
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+        g = _load_raw(dst)
+        if g is None:
+            raise OSError("not a guide")
+        g.pop("redact_pending", None)  # made-up pictures: nothing to hide
+        stamp = now_iso()
+        g.update(id=dst.name, created=stamp, updated=stamp, bookmarked=False)
+        write_json_atomic(dst / "guide.json", g)
+        return dst.name
+    except Exception:
+        if dst is not None:
+            shutil.rmtree(dst, ignore_errors=True)
+        return None
+
+
+def ensure_sample(storage: Path, src: Path) -> str | None:
+    """The sample guide, once per storage: after a copy that worked, never
+    again (a user who deletes it keeps it deleted). A failed copy retries
+    on the next launch."""
+    f = storage / "settings.json"
+    if f.exists():
+        # unreadable is not "first launch": no sample, and the file is left as
+        # it is (rewriting it would wipe the user's other settings)
+        try:
+            ok = isinstance(json.loads(f.read_text(encoding="utf-8")), dict)
+        except (OSError, ValueError):
+            ok = False
+        if not ok:
+            return None
+    if load_settings(storage)["sample_added"]:
+        return None
+    gid = add_sample(storage, src)
+    if gid:
+        try:
+            save_settings(storage, sample_added=True)
+        except OSError:  # unrecorded, it would be copied again next launch
+            shutil.rmtree(storage / gid, ignore_errors=True)
+            return None
+    return gid
+
+
 # -- trash ---------------------------------------------------------------------
 def trash_guide(storage: Path, gid: str) -> bool:
     src, dst = storage / gid, storage / TRASH / gid
@@ -327,8 +380,12 @@ def load_settings(storage: Path) -> dict:
 def _clean_settings(d: dict) -> dict:
     """Known keys only; redact_* of the wrong shape are dropped (-> defaults)."""
     out = {k: v for k, v in d.items() if k in DEFAULT_APP_SETTINGS}
-    if not isinstance(out.get("redact_on", True), bool):
-        del out["redact_on"]
+    for k in ("redact_on", "sample_added"):
+        if not isinstance(out.get(k, True), bool):
+            del out[k]
+    if "tours_seen" in out:
+        v = out["tours_seen"]
+        out["tours_seen"] = [t for t in TOURS if isinstance(v, list) and t in v]
     for k in ("redact_rules", "redact_custom"):
         if k in out and not (isinstance(out[k], list)
                              and all(isinstance(x, str) for x in out[k])):

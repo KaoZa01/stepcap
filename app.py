@@ -41,6 +41,7 @@ STORAGE = default_storage()
 STORAGE.mkdir(parents=True, exist_ok=True)
 RUN_FILE = STORAGE / "_run.json"   # port + token, so a second launch can poke us
 ICON_FILE = STORAGE / "_app.ico"
+SAMPLE_DIR = HERE / "samples" / "getting-started"  # copied in as the sample guide
 
 user32 = recorder.user32
 kernel32 = recorder.kernel32
@@ -253,6 +254,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({})
         if p == "/api/trash/empty":
             return self._json({"purged": library.empty_trash(STORAGE, recycle)})
+        if p == "/api/sample":
+            gid = library.add_sample(STORAGE, SAMPLE_DIR)
+            return self._json({"id": gid}) if gid else self._send(500, "no sample", "text/plain")
         if p == "/api/pages":
             data = _obj(body)
             if data is None or not isinstance(data.get("title"), str):
@@ -343,7 +347,8 @@ def _settings_ok(d: dict) -> bool:
     checks = {"view": lambda v: v in ("grid", "list"),
               "redact_on": lambda v: isinstance(v, bool),
               "redact_rules": lambda v: strs(v) and set(v) <= set(redact.RULES),
-              "redact_custom": strs}
+              "redact_custom": strs,
+              "tours_seen": lambda v: strs(v) and set(v) <= set(library.TOURS)}
     return bool(d) and all(k in checks and checks[k](v) for k, v in d.items())
 
 
@@ -923,6 +928,10 @@ def main():
     for f in (STORAGE / "_tmp").glob("print-*"):  # left by a crash mid-PDF
         f.unlink(missing_ok=True)
     ensure_app_icon(ICON_FILE)
+    try:  # first launch: the sample guide; never a reason not to start
+        library.ensure_sample(STORAGE, SAMPLE_DIR)
+    except Exception:
+        pass
 
     rec = Recorder(STORAGE)
     rec.set_monitor(recorder.monitor_index(

@@ -465,6 +465,125 @@ def test_redact_settings_defaults_and_validation():
         assert s["redact_on"] is True and s["redact_rules"] == list(redact.RULES)
 
 
+# -- onboarding: the sample guide and the tours' settings -----------------------
+def _fake_sample(root: Path) -> Path:
+    import library as L
+    src = root / "src"
+    src.mkdir()
+    (src / "a.png").write_bytes(_img_bytes("PNG"))
+    (src / "guide.json").write_text(json.dumps(
+        {"title": L.SAMPLE_TITLE, "app": "StepCap", "redact_pending": True,
+         "steps": [{"id": "s1", "kind": "click", "text": "x", "image": "a.png"}]},
+        ensure_ascii=False), encoding="utf-8")
+    return src
+
+
+def test_ensure_sample_once():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        src, st = _fake_sample(root), root / "store"  # the storage doesn't exist yet
+        gid = L.ensure_sample(st, src)
+        g = L.read_guide(st / gid)
+        assert g["title"] == L.SAMPLE_TITLE and "redact_pending" not in g and g["created"]
+        assert (st / gid / "a.png").is_file()
+        assert L.load_settings(st)["sample_added"] is True
+        assert L.ensure_sample(st, src) is None and len(list_guides(st)) == 1
+        trash_guide(st, gid)
+        assert L.ensure_sample(st, src) is None and list_guides(st) == []  # deleted stays deleted
+
+
+def test_ensure_sample_failure_retries_later():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d) / "store"
+        assert L.ensure_sample(st, Path(d) / "missing") is None
+        assert L.load_settings(st)["sample_added"] is False
+        assert not st.exists() or not any(p.is_dir() for p in st.iterdir())
+
+
+def test_add_sample_makes_new_copies():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        src, st = _fake_sample(root), root / "store"
+        st.mkdir()
+        a, b = L.add_sample(st, src), L.add_sample(st, src)
+        assert a and b and a != b and len(list_guides(st)) == 2
+
+
+def test_ensure_sample_settings_write_fails():
+    # copied but the flag can't be saved: no copy is kept, or every launch adds one
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        src, st = _fake_sample(root), root / "store"
+        real = L.save_settings
+
+        def broken(*a, **k):
+            raise OSError("locked")
+        L.save_settings = broken
+        try:
+            assert L.ensure_sample(st, src) is None
+        finally:
+            L.save_settings = real
+        assert list_guides(st) == []
+
+
+def test_ensure_sample_leaves_corrupt_settings_alone():
+    # an unreadable settings.json is not a first launch: no sample, file untouched
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        src, st = _fake_sample(root), root / "store"
+        st.mkdir()
+        (st / "settings.json").write_text('{"redact_custom": ["acme"', encoding="utf-8")
+        assert L.ensure_sample(st, src) is None
+        assert (st / "settings.json").read_text(encoding="utf-8") == '{"redact_custom": ["acme"'
+        assert list_guides(st) == []
+
+
+def test_add_sample_never_touches_a_taken_folder():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        src, st = _fake_sample(root), root / "store"
+        st.mkdir()
+        _seed(st, "taken", title="งานของผู้ใช้")
+        real = L.new_id
+        L.new_id = lambda storage, now=None: "taken"  # made in the same second
+        try:
+            assert L.add_sample(st, src) is None
+        finally:
+            L.new_id = real
+        assert _load(st, "taken")["title"] == "งานของผู้ใช้"
+
+
+def test_repo_sample_guide():
+    from PIL import Image
+    from library import SAMPLE_TITLE, image_kind, read_guide
+    src = Path(__file__).parent / "samples" / "getting-started"
+    g = read_guide(src)
+    assert g and g["title"] == SAMPLE_TITLE and "redact_pending" not in g
+    kinds = [s["kind"] for s in g["steps"]]
+    assert kinds.count("note") == 3 and len(kinds) == 10, kinds
+    for s in g["steps"]:
+        if s["image"]:
+            assert image_kind((src / s["image"]).read_bytes()) == "png", s["image"]
+            w, h = Image.open(src / s["image"]).size
+            assert all(0 <= m["x"] <= w and 0 <= m["y"] <= h for m in s["markers"]), s["id"]
+    assert [len(s["markers"]) for s in g["steps"] if s["kind"] == "click"] == [1, 1, 1, 1, 1]
+    assert (src / g["app_icon"]).is_file()
+
+
+def test_onboarding_settings_cleaned():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        assert L.save_settings(st, tours_seen=["home", "nope"], sample_added="yes")["tours_seen"] == ["home"]
+        assert L.load_settings(st)["sample_added"] is False
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
