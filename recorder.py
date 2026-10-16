@@ -545,6 +545,7 @@ class Recorder:
         self.hooks_ok = False
         self.hook_error = 0
         self._on_hotkey = on_hotkey  # callback(name): "toggle" | "pause"
+        self.on_guide_click = None  # Guide Me: callback(button, x, y) while not recording
 
         self._lock = threading.Lock()
         self._hooks_ready = threading.Event()
@@ -769,11 +770,25 @@ class Recorder:
 
     # -- mouse hook ----------------------------------------------------------
     def _ms_cb(self, nCode, wParam, lParam):
-        if nCode == 0 and self.recording and not self.paused:
+        if nCode == 0 and (self.on_guide_click or self.recording and not self.paused):
             ms = ctypes.cast(lParam,
                              ctypes.POINTER(MSLLHOOKSTRUCT)).contents
-            self._handle_mouse(wParam, ms.pt.x, ms.pt.y)
+            if self.recording:
+                if not self.paused:
+                    self._handle_mouse(wParam, ms.pt.x, ms.pt.y)
+            else:
+                self._guide_hook(wParam, ms.pt.x, ms.pt.y)
         return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+    def _guide_hook(self, wParam, x, y):
+        """Guide Me watches presses outside StepCap; the callback only queues."""
+        cb = self.on_guide_click
+        if cb is None or self.recording or wParam not in (WM_LBUTTONDOWN, WM_RBUTTONDOWN):
+            return
+        if is_own_window(user32.GetAncestor(
+                user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT)):
+            return
+        cb("right" if wParam == WM_RBUTTONDOWN else "left", x, y)
 
     def _in_selected(self, x: int, y: int) -> bool:
         m = self.monitors[self.selected]

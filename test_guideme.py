@@ -68,6 +68,95 @@ def test_session_flow():
     assert s.index == 0 and not s.done
 
 
+def test_uia_finds_own_button():
+    # our own tk window, read through UI Automation; nothing is clicked
+    import threading
+    import time
+    import tkinter as tk
+
+    import recorder
+    from guideme import UIAFind, top_windows
+    recorder.set_dpi_aware()
+    root = tk.Tk()
+    root.title("gm-test")
+    b = tk.Button(root, text="Press me")
+    b.pack(padx=40, pady=40)
+    root.update()
+    # Tk leaves the native button's text empty for UIA; name it like Win32 apps do
+    recorder.user32.SetWindowTextW(b.winfo_id(), "Press me")
+    hwnd = recorder.find_main_window("gm-test")
+    out = {}
+
+    def work():
+        try:
+            out["rects"] = UIAFind().elements(hwnd, "", "Press me", 50000)
+            out["wins"] = top_windows(skip_own=False)
+        except Exception as e:
+            out["err"] = e
+
+    th = threading.Thread(target=work)
+    th.start()
+    while th.is_alive():  # the window answers UIA from this thread
+        root.update()
+        time.sleep(0.01)
+    bx, by, bw, bh = b.winfo_rootx(), b.winfo_rooty(), b.winfo_width(), b.winfo_height()
+    root.destroy()
+    assert "err" not in out, out.get("err")
+    assert len(out["rects"]) == 1
+    l, t, r, btm = out["rects"][0]
+    assert bx <= (l + r) / 2 <= bx + bw and by <= (t + btm) / 2 <= by + bh
+    me = [w for w in out["wins"] if w["hwnd"] == hwnd]
+    assert me and me[0]["exe"].lower().startswith("python") and "\\" not in me[0]["exe"]
+    assert all(w["hwnd"] != hwnd for w in top_windows())  # own windows skipped by default
+
+
+def test_hook_forwards_clicks_not_on_own_windows():
+    # the hook's decision only; no input is sent
+    import tkinter as tk
+
+    import recorder
+    recorder.set_dpi_aware()
+    r = recorder.Recorder.__new__(recorder.Recorder)
+    r.recording = False
+    got = []
+    r.on_guide_click = lambda *a: got.append(a)
+    root = tk.Tk()
+    root.attributes("-topmost", True)
+    root.geometry("200x200+100+100")
+    root.update()
+    cx, cy = root.winfo_rootx() + 100, root.winfo_rooty() + 100
+    r._guide_hook(recorder.WM_LBUTTONDOWN, cx, cy)       # StepCap's own window
+    r._guide_hook(recorder.WM_LBUTTONUP, -30000, -30000)  # not a press
+    r._guide_hook(recorder.WM_RBUTTONDOWN, -30000, -30000)
+    r.recording = True
+    r._guide_hook(recorder.WM_LBUTTONDOWN, -30000, -30000)  # recording wins
+    root.destroy()
+    assert got == [("right", -30000, -30000)], got
+
+
+def test_overlay_highlight_box_and_hide():
+    import threading
+
+    import overlay
+    import recorder
+    recorder.set_dpi_aware()
+    ov = overlay.Overlay()
+
+    def ask(fn):  # run fn on the overlay's tk thread, return its value
+        out, ev = {}, threading.Event()
+        ov._q.put(lambda: (out.setdefault("v", fn()), ev.set()))
+        assert ev.wait(3)
+        return out["v"]
+
+    ov.highlight({"state": "element", "shape": "box", "rect": (300, 200, 400, 240)})
+    geo = ask(lambda: (ov._hl.winfo_rootx(), ov._hl.winfo_rooty(), ov._hl.winfo_width(),
+                       ov._hl.winfo_height(), ov._hl.state()))
+    assert geo == (293, 193, 114, 54, "normal"), geo
+    ov.highlight({"state": "missing", "shape": None, "rect": None, "app": "x"})
+    assert ask(lambda: ov._hl.state()) == "withdrawn"
+    ask(lambda: ov._root.quit())
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

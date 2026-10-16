@@ -6,7 +6,13 @@ draws the highlight and docks the side panel.
 """
 from __future__ import annotations
 
+import os
+import queue
+import threading
+from ctypes import wintypes
 from pathlib import Path
+
+import recorder
 
 CLICKS = {"click", "rightclick", "doubleclick"}
 MARKER = 44  # a circle the size of a recorded click marker
@@ -96,3 +102,140 @@ class Session:
             return False
         self.next()
         return True
+
+
+# -- Windows glue -------------------------------------------------------------
+_EXE: dict[int, str] = {}  # hwnd -> exe name; a window never changes process
+
+
+def top_windows(skip_own: bool = True) -> list[dict]:
+    """Visible, not minimised top-level windows, top-most first."""
+    wins, me = [], os.getpid()
+    u = recorder.user32
+
+    def _cb(h, _):
+        if u.IsWindowVisible(h) and not u.IsIconic(h) \
+                and not (skip_own and recorder.window_pid(h) == me):
+            r = recorder.window_rect(h)
+            if r and r[2] > r[0] and r[3] > r[1]:
+                if h not in _EXE:
+                    _EXE[h] = Path(recorder.window_info(h)[2]).name
+                wins.append({"hwnd": h, "exe": _EXE[h],
+                             "title": recorder.window_title(h), "rect": r})
+        return True
+
+    u.EnumWindows(recorder.WNDENUMPROC(_cb), 0)
+    return wins
+
+
+class UIAFind:
+    """Element search; create and use it on one thread (its COM apartment)."""
+    _AID, _NAME, _TYPE = 30011, 30005, 30003
+    _DESCENDANTS = 4
+
+    def __init__(self):
+        self._u = recorder._UIA()._uia
+
+    def _all(self, root, cond) -> list[tuple]:
+        found = root.FindAll(self._DESCENDANTS, cond)
+        out = []
+        for i in range(found.Length if found else 0):
+            el = found.GetElement(i)
+            if el.CurrentIsOffscreen:
+                continue
+            r = el.CurrentBoundingRectangle
+            out.append((r.left, r.top, r.right, r.bottom))
+        return out
+
+    def elements(self, hwnd, aid: str, name: str, ctype: int) -> list[tuple]:
+        """Rects of the elements in that window matching aid, else name+type."""
+        u = self._u
+        root = u.ElementFromHandle(wintypes.HWND(hwnd))
+        if aid:
+            got = self._all(root, u.CreatePropertyCondition(self._AID, aid))
+            if got:
+                return got
+        if not name:
+            return []
+        return self._all(root, u.CreateAndCondition(
+            u.CreatePropertyCondition(self._NAME, name),
+            u.CreatePropertyCondition(self._TYPE, ctype)))
+
+
+class Runner:
+    """The live walk-through: a thread that finds the current step's target
+    every half second, keeps the highlight on it, and moves on when the
+    person clicks it. state() is what the side panel shows."""
+
+    TICK = 0.5
+
+    def __init__(self, steps: list[dict], origin: tuple[int, int], highlight):
+        self.session = Session(steps)
+        self._origin = origin
+        self._highlight = highlight
+        self._q: queue.Queue = queue.Queue()
+        self._res = {"state": "none", "shape": None, "rect": None, "app": ""}
+        threading.Thread(target=self._run, daemon=True).start()
+
+    # thread-safe API
+    def click(self, button: str, x: int, y: int):
+        self._q.put(("click", button, x, y))  # called from the mouse hook: never block
+
+    def go(self, i: int):
+        self._q.put(("go", i))
+
+    def next(self):
+        self._q.put(("step", 1))
+
+    def back(self):
+        self._q.put(("step", -1))
+
+    def stop(self):
+        self._q.put(("stop",))
+
+    def state(self) -> dict:
+        s = self.session
+        return {"index": s.index, "done": s.done, "state": self._res["state"],
+                "app": self._res["app"]}
+
+    # worker thread
+    def _run(self):
+        try:
+            uia = UIAFind()
+        except Exception:
+            uia = None
+        while True:
+            try:
+                item = self._q.get(timeout=self.TICK)
+            except queue.Empty:
+                item = None
+            if item and item[0] == "stop":
+                self._highlight(None)
+                return
+            s = self.session
+            if item and item[0] == "click":
+                s.on_click(item[1], item[2], item[3], self._res)
+            elif item and item[0] == "go":
+                s.go(item[1])
+            elif item and item[0] == "step":
+                s.go(s.index + item[1])
+            try:
+                self._tick(uia)
+            except Exception:
+                pass  # a window closing mid-search; the next tick tries again
+
+    def _tick(self, uia):
+        s = self.session
+        if s.done:
+            self._res = {"state": "none", "shape": None, "rect": None, "app": ""}
+        else:
+            wins = None
+
+            def find_window(exe, title):
+                nonlocal wins
+                wins = top_windows() if wins is None else wins
+                return pick_window(wins, exe, title)
+
+            find = uia.elements if uia else (lambda *a: [])
+            self._res = resolve(s.steps[s.index], find_window, find, self._origin)
+        self._highlight(self._res)
