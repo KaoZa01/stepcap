@@ -167,10 +167,19 @@ function iedDraw() {
     g.restore();
   }
   if (IED.sel) {
-    const b = iedBounds(IED.sel.item);
+    const it = IED.sel.item, b = iedBounds(it);
     g.save();
     g.lineWidth = 2 * u; g.strokeStyle = "#2563eb";
-    g.strokeRect(b.x - 4 * u, b.y - 4 * u, b.w + 8 * u, b.h + 8 * u);
+    if (iedResizable(it)) {
+      g.strokeRect(b.x, b.y, b.w, b.h);
+      g.fillStyle = "#fff";
+      for (const c of iedCorners(it)) {  // handles, 10 screen px
+        g.fillRect(c.x - 5 * u, c.y - 5 * u, 10 * u, 10 * u);
+        g.strokeRect(c.x - 5 * u, c.y - 5 * u, 10 * u, 10 * u);
+      }
+    } else {
+      g.strokeRect(b.x - 4 * u, b.y - 4 * u, b.w + 8 * u, b.h + 8 * u);
+    }
     g.restore();
   }
 }
@@ -215,6 +224,17 @@ function iedHit(p) {
   return null;
 }
 
+// Boxes, blurs and black-outs resize from their corners once selected.
+const iedResizable = it => it && (it.type === "box" || it.type === "blur" || it.type === "black");
+const iedCorners = it => [{x: it.x, y: it.y}, {x: it.x + it.w, y: it.y},
+  {x: it.x + it.w, y: it.y + it.h}, {x: it.x, y: it.y + it.h}];  // tl, tr, br, bl
+function iedHandleAt(p) {
+  const it = IED.sel?.item;
+  if (!iedResizable(it)) return -1;
+  const tol = 8 * iedUnit();
+  return iedCorners(it).findIndex(c => Math.abs(p.x - c.x) <= tol && Math.abs(p.y - c.y) <= tol);
+}
+
 function iedMoveItem(it, orig, dx, dy) {
   if (it.type === "arrow") Object.assign(it, {x1: orig.x1 + dx, y1: orig.y1 + dy, x2: orig.x2 + dx, y2: orig.y2 + dy});
   else Object.assign(it, {x: orig.x + dx, y: orig.y + dy});
@@ -225,6 +245,11 @@ async function iedDown(e) {
   if (!IED.img || (iedGif() && IED.tool !== "select")) return;
   const p = IED.toImage(e.clientX, e.clientY), st = IED.step;
   if (IED.tool === "select") {
+    const h = iedHandleAt(p);
+    if (h >= 0) {  // resize: the opposite corner stays put
+      IED.drag = {handle: h, fixed: iedCorners(IED.sel.item)[(h + 2) % 4], moved: false};
+      return;
+    }
     IED.sel = iedHit(p);
     if (IED.sel) IED.drag = {start: p, orig: JSON.parse(JSON.stringify(IED.sel.item)), moved: false};
     iedDraw(); iedOpts();
@@ -254,8 +279,19 @@ function iedMove(e) {
   const d = IED.drag;
   if (d && IED.sel) {
     if (!d.moved) { iedPush(); d.moved = true; }
-    iedMoveItem(IED.sel.item, d.orig, p.x - d.start.x, p.y - d.start.y);
+    if (d.handle !== undefined) {
+      const r = iedRect(d.fixed, p);
+      if (r.w >= MIN_DRAG && r.h >= MIN_DRAG) Object.assign(IED.sel.item, r);
+    } else {
+      iedMoveItem(IED.sel.item, d.orig, p.x - d.start.x, p.y - d.start.y);
+    }
     iedDraw();
+    return;
+  }
+  if (IED.tool === "select" && e.target === IED.canvas) {  // hover cursor
+    const h = iedHandleAt(p);
+    IED.canvas.style.cursor = h === 0 || h === 2 ? "nwse-resize" : h === 1 || h === 3 ? "nesw-resize"
+      : iedHit(p) ? "move" : "";
   }
 }
 
@@ -319,8 +355,11 @@ function iedDelete() {
 
 function iedKey(e) {
   if (!IED.open || document.querySelector("dialog[open]")) return;
-  if (e.target instanceof Element && e.target.closest("input, textarea")) return;
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); iedUndo(); }
+  if (e.target instanceof Element && e.target.closest("input[type=text], textarea")) return;
+  // e.code is the physical key: on a Thai layout Ctrl+Z arrives with e.key "ผ"
+  if ((e.ctrlKey || e.metaKey) && (e.code === "KeyZ" || e.key.toLowerCase() === "z")) {
+    e.preventDefault(); iedUndo();
+  }
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); iedDelete(); }
   else if (e.key === "Escape") {
     if (IED.tool !== "select") iedSetTool("select");

@@ -362,6 +362,54 @@ def test_ring_takes_custom_colour():
     js("closeImageEditor();")
 
 
+def _draw_box():
+    js(_PTR + "document.querySelector('.ied [data-tool=box]').click();"
+       "ev('pointerdown', 20, 20); ev('pointermove', 120, 90); ev('pointerup', 120, 90);")
+
+
+def test_ctrl_z_with_thai_layout():
+    js(_OPEN)
+    n = js("return IED.step.annotations.length;")
+    _draw_box()
+    assert js("return IED.step.annotations.length;") == n + 1
+    # Ctrl+Z on a Thai layout: key is "ผ", the physical key is still KeyZ
+    js("document.dispatchEvent(new KeyboardEvent('keydown',"
+       " {key: 'ผ', code: 'KeyZ', ctrlKey: true, bubbles: true}));")
+    assert js("return IED.step.annotations.length;") == n
+    _draw_box()
+    # after using the ring-size slider (focus on a range input) Ctrl+Z still works
+    js("const r = document.createElement('input'); r.type = 'range';"
+       "document.querySelector('.ied-opts').appendChild(r); r.focus();"
+       "r.dispatchEvent(new KeyboardEvent('keydown',"
+       " {key: 'z', code: 'KeyZ', ctrlKey: true, bubbles: true}));")
+    assert js("return IED.step.annotations.length;") == n
+    js("closeImageEditor();")
+
+
+def test_resize_redaction_after_release():
+    js(_OPEN)
+    red = js("return IED.step.redactions[0];")  # black {20,20,60,40} on noise
+    # select it, then drag its bottom-right corner handle further out
+    js(_PTR + "document.querySelector('.ied [data-tool=select]').click();"
+       "const k = r.width / c.width;"  # screen px per image px
+       "ev('pointerdown', 50 * k, 40 * k); ev('pointerup', 50 * k, 40 * k);"
+       "ev('pointerdown', 80 * k, 60 * k); ev('pointermove', 110 * k, 90 * k);"
+       "ev('pointerup', 110 * k, 90 * k);")
+    got = js("return IED.step.redactions[0];")
+    assert (round(got["x"]), round(got["y"])) == (red["x"], red["y"]), got
+    assert round(got["w"]) == 90 and round(got["h"]) == 70, got
+    # the top-left handle moves that corner and keeps the opposite one
+    js(_PTR + "const k = r.width / c.width;"
+       "ev('pointerdown', 20 * k, 20 * k); ev('pointermove', 10 * k, 5 * k);"
+       "ev('pointerup', 10 * k, 5 * k);")
+    got = js("return IED.step.redactions[0];")
+    assert (round(got["x"]), round(got["y"]), round(got["w"]), round(got["h"])) == (10, 5, 100, 85), got
+    js("IED.undo(); IED.undo();")
+    back = js("return IED.step.redactions[0];")
+    assert (back["x"], back["y"], back["w"], back["h"]) == (red["x"], red["y"], red["w"], red["h"])
+    js("closeImageEditor();")
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
@@ -370,7 +418,8 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_undo_restores_replaced_image, test_editor_gif_tools_disabled,
          test_blur_at_image_edges_hides_pixels, test_blur_keeps_earlier_black,
          test_repeated_paste_from_caption_box, test_gif_stays_locked_after_undo,
-         test_ring_takes_custom_colour]
+         test_ring_takes_custom_colour, test_ctrl_z_with_thai_layout,
+         test_resize_redaction_after_release]
 
 
 def run_all(holder):
