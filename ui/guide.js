@@ -93,15 +93,18 @@ async function renderGuide(guide, root) {
     const d = new Date(iso);
     return iso && !isNaN(d) ? d.toLocaleDateString("th-TH", {year: "numeric", month: "short", day: "numeric"}) : "";
   };
-  const numbered = guide.steps.filter(s => s.kind !== "note");
-  const meta = [];
+  const numbered = guide.steps.filter(s => s.kind !== "note" && s.kind !== "section");
+  // a page: "section" entries open each guide or text block; numbering restarts
+  const secs = guide.steps.filter(s => s.kind === "section" && !s.missing);
+  const meta = guide.meta_count ? [guide.meta_count] : [];
   if (S.step_count) meta.push(numbered.length + " ขั้นตอน");
   if (S.created && fmt(guide.created)) meta.push("สร้างเมื่อ " + fmt(guide.created));
   if (S.updated && fmt(guide.updated)) meta.push("แก้ไขล่าสุด " + fmt(guide.updated));
   let html = '<div class="rg-wrap"><h1>' + E(guide.title) + "</h1>";
   if (meta.length) html += '<div class="rg-meta">' + meta.map(E).join(" · ") + "</div>";
-  if (S.toc && numbered.length)
-    html += '<nav class="rg-toc"><b>สารบัญ</b><ol>' + numbered.map(s =>
+  const toc = secs.length ? secs : numbered;
+  if (S.toc && toc.length)
+    html += '<nav class="rg-toc"><b>สารบัญ</b><ol>' + toc.map(s =>
       '<li><a href="#step-' + E(s.id) + '">' + E(s.text) + "</a></li>").join("") + "</ol></nav>";
   root.innerHTML = html + "</div>";
   const wrap = root.querySelector(".rg-wrap");
@@ -110,7 +113,13 @@ async function renderGuide(guide, root) {
     const div = document.createElement("div");
     div.className = "rg-step";
     div.id = "step-" + step.id;
-    if (step.kind === "note") {
+    if (step.kind === "section") {
+      n = 0;
+      div.className = "rg-secwrap";
+      div.innerHTML = step.missing ? '<div class="rg-missing">' + E(step.text) + "</div>"
+        : '<h2 class="rg-sec">' + E(step.text) + "</h2>" +
+          (step.body ? '<p class="rg-body">' + E(step.body) + "</p>" : "");
+    } else if (step.kind === "note") {
       div.innerHTML = '<div class="rg-note">' + E(step.text) + "</div>";
     } else {
       div.innerHTML = '<div class="rg-head"><div class="rg-num">' + (++n) + "</div><div>" + E(step.text) + "</div></div>";

@@ -25,10 +25,14 @@ def thai_date(iso: str) -> str:
 
 
 def numbered(guide: dict) -> list[tuple[int | None, dict]]:
-    """(step number, step); notes get None and don't count."""
+    """(step number, step); notes and sections get None and don't count, and
+    a section (a page's guide or text block) starts the numbering again."""
     out, n = [], 0
     for s in guide.get("steps") or []:
-        if s.get("kind") == "note":
+        if s.get("kind") == "section":
+            n = 0
+            out.append((None, s))
+        elif s.get("kind") == "note":
             out.append((None, s))
         else:
             n += 1
@@ -38,7 +42,7 @@ def numbered(guide: dict) -> list[tuple[int | None, dict]]:
 
 def meta_line(guide: dict) -> str:
     S = guide.get("settings") or {}
-    parts = []
+    parts = [guide["meta_count"]] if guide.get("meta_count") else []  # a page counts guides
     if S.get("step_count"):
         parts.append(f"{sum(1 for n, _ in numbered(guide) if n)} ขั้นตอน")
     if S.get("created") and thai_date(guide.get("created", "")):
@@ -76,25 +80,40 @@ def _one_line(text: str) -> str:
 
 def build_markdown(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     """images: step id -> (ext, bytes); a step without one has no picture."""
-    steps = numbered(guide)
+    steps = [(n, s) for n, s in numbered(guide) if not s.get("missing")]
+    secs = [s for _, s in steps if s.get("kind") == "section"]
     lines = [f"# {_one_line(guide.get('title', ''))}", ""]
     meta = meta_line(guide)
     if meta:
         lines += [meta, ""]
-    if (guide.get("settings") or {}).get("toc") and any(n for n, _ in steps):
+    toc = (guide.get("settings") or {}).get("toc")
+    if toc and secs:  # a page: its guides and text blocks
+        lines += ["**สารบัญ**", ""]
+        lines += [f"{i + 1}. [{_one_line(s.get('text'))}](#a{i})" for i, s in enumerate(secs)]
+        lines.append("")
+    elif toc and any(n for n, _ in steps):
         lines += ["**สารบัญ**", ""]
         lines += [f"{n}. [{_one_line(s.get('text'))}](#step-{n})" for n, s in steps if n]
         lines.append("")
-    files = {}
+    files, sec = {}, -1
+    step_h = "###" if secs else "##"
     for n, s in steps:
+        if s.get("kind") == "section":
+            sec += 1
+            lines += [f'<a id="a{sec}"></a>', f"## {_one_line(s.get('text'))}", ""]
+            if s.get("body"):
+                lines += [md_escape(s["body"]), ""]
+            continue
         if n is None:
             lines += [f"> {md_escape(line)}" for line in (s.get("text") or "").split("\n")]
             lines.append("")
             continue
-        lines += [f'<a id="step-{n}"></a>', f"## {n}. {_one_line(s.get('text'))}", ""]
+        if not secs:
+            lines.append(f'<a id="step-{n}"></a>')
+        lines += [f"{step_h} {n}. {_one_line(s.get('text'))}", ""]
         if s.get("id") in images:
             ext, data = images[s["id"]]
-            name = f"images/step-{n:02d}.{ext}"
+            name = f"images/{sec:02d}-{n:02d}.{ext}" if secs else f"images/step-{n:02d}.{ext}"
             files[name] = data
             lines += [f"![]({name})", ""]
     buf = BytesIO()
@@ -164,23 +183,29 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
             setattr(cp, k, datetime.fromisoformat(guide.get(k if k == "created" else "updated", "")))
         except (TypeError, ValueError):
             pass
-    for name in ("Normal", "Title", "List Number"):
+    for name in ("Normal", "Title", "List Number", "Heading 1"):
         _thai_font(doc.styles[name])
     sec = doc.sections[0]
     sec.page_width, sec.page_height = Mm(210), Mm(297)  # A4
     text_w = sec.page_width - sec.left_margin - sec.right_margin
-    steps = numbered(guide)
+    steps = [(n, s) for n, s in numbered(guide) if not s.get("missing")]
+    secs = [s for _, s in steps if s.get("kind") == "section"]
 
     doc.add_paragraph(guide.get("title", ""), style="Title")
     meta = meta_line(guide)
     if meta:
         doc.add_paragraph(meta)
-    if (guide.get("settings") or {}).get("toc") and any(n for n, _ in steps):
+    if (guide.get("settings") or {}).get("toc") and (secs or any(n for n, _ in steps)):
         _run(doc.add_paragraph(), "สารบัญ", bold=True)
         for n, s in steps:
-            if n:
-                doc.add_paragraph(s.get("text", ""), style="List Number")
+            if (s.get("kind") == "section") if secs else n:
+                doc.add_paragraph(s.get("text") or "", style="List Number")
     for n, s in steps:
+        if s.get("kind") == "section":
+            doc.add_paragraph(s.get("text") or "", style="Heading 1")
+            if s.get("body"):
+                doc.add_paragraph(s["body"])
+            continue
         if n is None:
             p = doc.add_paragraph()
             _run(p, s.get("text") or "", italic=True)

@@ -210,6 +210,23 @@ def test_export_contains_no_original():
     assert _black(img, range(20, 80), range(20, 60))
 
 
+def test_render_sections():
+    doc = {"title": "P", "settings": {"toc": True}, "steps": [
+        {"id": "sec0", "kind": "section", "text": "ก", "gid": "noise"},
+        {"id": "noise.x", "kind": "click", "text": "a"}, {"id": "noise.y", "kind": "click", "text": "b"},
+        {"id": "sec1", "kind": "section", "text": "ข", "body": "อธิบาย"},
+        {"id": "sec2", "kind": "section", "text": "ค", "gid": "old"},
+        {"id": "old.x", "kind": "click", "text": "c"},
+        {"id": "sec3", "kind": "section", "text": "คู่มือนี้ถูกลบแล้ว", "missing": True}]}
+    got = js("const r = document.createElement('div'); document.body.appendChild(r);"
+             f"await renderGuide({json.dumps(doc, ensure_ascii=False)}, r);"
+             "const q = s => [...r.querySelectorAll(s)].map(e => e.textContent.trim());"
+             "const out = [q('.rg-sec'), q('.rg-num'), q('.rg-toc li'), q('.rg-body'), q('.rg-missing')];"
+             "r.remove(); return out;")
+    assert got == [["ก", "ข", "ค"], ["1", "2", "1"], ["ก", "ข", "ค"], ["อธิบาย"],
+                   ["คู่มือนี้ถูกลบแล้ว"]], got
+
+
 def test_print_html_uses_img():
     html = js("return await buildExportHtml('noise', {print: true});")
     assert "@page" in html and "break-inside:avoid" in html, html[:400]
@@ -582,6 +599,7 @@ def test_pasted_image_redacted():
 
 
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
+         test_render_sections,
          test_export_images_no_original, test_export_images_skip_broken,
          test_html_export_names_missing_gif,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
