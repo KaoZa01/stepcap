@@ -161,7 +161,7 @@ function viewPage() {
     </header><div class="gbody"><div id="rg"></div></div>`;
   document.getElementById("back").onclick = () => nav({page: "home"});
   document.getElementById("edit").onclick = () => goGuide(GID, "edit");
-  document.getElementById("exp").onclick = () => exportGuide(GID);
+  document.getElementById("exp").onclick = e => { e.stopPropagation(); exportMenu(e.currentTarget, GID); };
   const g = {...STATE, steps: STATE.steps.map(s => s.image ? {...s, _src: imgUrl(GID, s.image)} : s)};
   renderGuide(g, document.getElementById("rg"));
   startStatusPoll(() => {}, 1000);
@@ -191,11 +191,13 @@ function renderStepPng(step, gid) {
 // One self-contained HTML file that looks like view mode. Every non-GIF image
 // is flattened first, so no original screenshot ever leaves the machine.
 // print: the PDF source -- pictures as <img> (print waits for them) and A4 CSS.
-async function buildExportHtml(gid, {print = false} = {}) {
+async function buildExportHtml(gid, {print = false, failed = []} = {}) {
   const g = await getJSON("/api/guide/" + encodeURIComponent(gid));
   const steps = [];
+  let n = 0;
   for (const s of g.steps) {
     const c = {...s};
+    if (s.kind !== "note") n++;
     try {
       if (s.image && isGif(s)) {
         c._src = await asDataUrl(await (await api("/img/" + encodeURIComponent(gid) +
@@ -207,6 +209,7 @@ async function buildExportHtml(gid, {print = false} = {}) {
         if (print) c._img = true;
       }
     } catch {  // an unreadable image is exported without its picture
+      failed.push(n);
       delete c._src;
       Object.assign(c, {crop: null, markers: [], annotations: [], redactions: []});
     }
@@ -227,12 +230,61 @@ ${drawStepCanvas}
 const PRINT_CSS = "@page{size:A4;margin:14mm}body{padding:0}" +
   ".rg-step{break-inside:avoid}.rg-step img{max-width:100%;height:auto}";
 
-// Saved via Save As.
-async function exportGuide(gid) {
-  const html = await buildExportHtml(gid);
-  const r = await (await api("/api/guide/" + encodeURIComponent(gid) + "/export",
-    {method: "POST", headers: {"Content-Type": "text/html; charset=utf-8"}, body: html})).json();
-  if (r.saved) toast("บันทึกไฟล์แล้ว");
+// Finished pictures for Markdown and Word: every PNG comes from renderStepPng,
+// so hidden parts are really gone; a GIF is only flagged (the server reads it
+// from the guide folder). failed: step numbers whose picture couldn't be drawn.
+async function exportImages(g, gid) {
+  const images = {}, failed = [];
+  let n = 0;
+  for (const s of g.steps) {
+    if (s.kind === "note") continue;
+    n++;
+    if (!s.image) continue;
+    if (isGif(s)) { images[s.id] = {ext: "gif"}; continue; }
+    try {
+      const url = await asDataUrl(await renderStepPng(s, gid));
+      images[s.id] = {ext: "png", data: url.slice(url.indexOf(",") + 1)};
+    } catch { failed.push(n); }
+  }
+  return {images, failed};
+}
+
+const EXPORT_FORMATS = [["html", "HTML"], ["pdf", "PDF"], ["md", "Markdown (.zip)"], ["docx", "Word (.docx)"]];
+function exportMenu(anchor, gid) {
+  popMenu(anchor, EXPORT_FORMATS.map(([f, label]) => ({label, run: () => exportGuide(gid, f)})));
+}
+
+// Builds the file in the page (pictures) and Python (assembly), saved via Save As.
+let EXPORTING = false;
+async function exportGuide(gid, format = "html") {
+  if (EXPORTING) return;
+  EXPORTING = true;
+  toast("กำลังส่งออก…");
+  const failed = [];
+  let r;
+  try {
+    let body, type = "text/html; charset=utf-8";
+    if (format === "html" || format === "pdf") {
+      body = await buildExportHtml(gid, {print: format === "pdf", failed});
+    } else {
+      const x = await exportImages(await getJSON("/api/guide/" + encodeURIComponent(gid)), gid);
+      failed.push(...x.failed);
+      body = JSON.stringify({images: x.images});
+      type = "application/json";
+    }
+    const res = await api("/api/guide/" + encodeURIComponent(gid) + "/export?format=" + format,
+      {method: "POST", headers: {"Content-Type": type}, body});
+    r = res.ok ? await res.json() : {error: "ส่งออกไม่สำเร็จ"};
+  } catch {
+    r = {error: "ส่งออกไม่สำเร็จ"};
+  } finally {
+    EXPORTING = false;
+  }
+  document.querySelectorAll(".toast").forEach(t => t.remove());
+  if (r.error) return toast("ส่งออกไม่สำเร็จ: " + r.error, 6000);
+  if (!r.saved) return;  // cancelled
+  toast(failed.length ? `บันทึกไฟล์แล้ว แต่ภาพของขั้นที่ ${failed.join(", ")} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ`
+    : "บันทึกไฟล์แล้ว", failed.length ? 8000 : 2500);
 }
 
 // ---------------------------------------------------------------- edit mode
@@ -287,7 +339,11 @@ function editPage() {
   document.getElementById("title").oninput = e => { STATE.title = e.target.value; scheduleSave(); };
   document.getElementById("back").onclick = async () => { if (await flush()) nav({page: "home"}); };
   document.getElementById("done").onclick = async () => { if (await flush()) goGuide(GID, "view"); };
-  document.getElementById("exp").onclick = async () => { if (await flush()) exportGuide(GID); };
+  document.getElementById("exp").onclick = async e => {
+    e.stopPropagation();
+    const b = e.currentTarget;
+    if (await flush()) exportMenu(b, GID);
+  };
   document.querySelectorAll(".tb[data-pop]").forEach(b => b.onclick = e => {
     e.stopPropagation(); toggleToolPop(b.dataset.pop, b);
   });
@@ -437,9 +493,13 @@ async function downloadStepImage(step) {
   } catch {
     return toast("เปิดภาพนี้ไม่ได้");
   }
-  const r = await (await api("/api/guide/" + encodeURIComponent(GID) + "/download?n=" + n,
-    {method: "POST", body})).json();
-  if (r.saved) toast("บันทึกภาพแล้ว");
+  let r;
+  try {
+    r = await (await api("/api/guide/" + encodeURIComponent(GID) + "/download?n=" + n,
+      {method: "POST", body})).json();
+  } catch { r = {error: "ดาวน์โหลดไม่สำเร็จ"}; }
+  if (r.error) toast("บันทึกภาพไม่สำเร็จ: " + r.error, 6000);
+  else if (r.saved) toast("บันทึกภาพแล้ว");
 }
 
 // ---- steps (linear cards or grid thumbnails)

@@ -216,6 +216,19 @@ def test_print_html_uses_img():
     assert "@page" not in js("return await buildExportHtml('noise');")
 
 
+def test_export_images_no_original():
+    r = js("const g = await getJSON('/api/guide/noise'); return await exportImages(g, 'noise');")
+    assert r["failed"] == [] and r["images"]["a3"] == {"ext": "gif"}, r["failed"]
+    b64 = r["images"]["a1"]["data"]
+    assert base64.b64encode(NOISE_PNG).decode()[1000:1200] not in b64
+    assert _black(png(b64), range(20, 80), range(20, 60))
+
+
+def test_export_images_skip_broken():
+    r = js("const g = await getJSON('/api/guide/broken'); return await exportImages(g, 'broken');")
+    assert r == {"images": {}, "failed": [1, 2]}, r
+
+
 def test_bake_redaction_across_crop():
     img = png(js("const g = await getJSON('/api/guide/cropx');"
                  "return __b64(await renderStepPng(g.steps[0], 'cropx'));"))
@@ -456,6 +469,13 @@ def test_colour_picked_before_drawing():
     js("closeImageEditor();")
 
 
+def test_export_menu_formats():
+    page("guide=noise&mode=edit")
+    got = js("document.getElementById('exp').click(); await new Promise(r => setTimeout(r, 200));"
+             "return [...document.querySelectorAll('.menu-pop button')].map(b => b.textContent.trim());")
+    assert got == ["HTML", "PDF", "Markdown (.zip)", "Word (.docx)"], got
+
+
 def test_settings_page_redact():
     page("page=settings")
     got = js("await new Promise(r => setTimeout(r, 500));"
@@ -524,6 +544,7 @@ def test_pasted_image_redacted():
 
 
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
+         test_export_images_no_original, test_export_images_skip_broken,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
          test_image_paste_adds_step, test_broken_image_tolerated,
@@ -534,7 +555,7 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_ring_takes_custom_colour, test_ctrl_z_with_thai_layout,
          test_resize_redaction_after_release, test_colour_picked_before_drawing,
          test_settings_page_redact, test_redact_cover_and_note,
-         test_editor_redact_button, test_pasted_image_redacted]
+         test_editor_redact_button, test_pasted_image_redacted, test_export_menu_formats]
 
 
 def run_all(holder):

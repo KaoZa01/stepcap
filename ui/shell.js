@@ -176,8 +176,8 @@ function guideTools(el, g) {
   };
   t.querySelector(".more").onclick = e => {
     e.stopPropagation();
-    const id = encodeURIComponent(g.id);
-    popMenu(e.currentTarget, [
+    const id = encodeURIComponent(g.id), anchor = e.currentTarget;
+    popMenu(anchor, [
       {label: "เปิด", run: () => goGuide(g.id, "view")},
       {label: "เปลี่ยนชื่อ", run: async () => {
         const title = await uiPrompt("เปลี่ยนชื่อคู่มือ", g.title);
@@ -189,7 +189,7 @@ function guideTools(el, g) {
       {label: "ทำสำเนา", run: async () => {
         toast((await post(`/api/guide/${id}/duplicate`)).ok ? "ทำสำเนาแล้ว" : FAILED); refresh();
       }},
-      {label: "ส่งออก", run: () => exportGuide(g.id)},
+      {label: "ส่งออก", run: () => exportMenu(anchor, g.id)},
       {label: "ลบ", danger: true, run: async () => {
         toast((await post(`/api/guide/${id}/delete`)).ok ? "ย้ายไปถังขยะแล้ว" : FAILED); refresh();
       }},

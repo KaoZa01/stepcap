@@ -112,6 +112,26 @@ def test_docx_notes_only():
     assert len(d.inline_shapes) == 0 and "ระวัง" in [p.text for p in d.paragraphs]
 
 
+def test_export_write_error_reported():
+    # Save As picked a place that can't be written: say so, don't pretend it saved
+    import json
+    import os
+    import tempfile
+    from pathlib import Path
+    st = Path(tempfile.mkdtemp(prefix="stepcap-exp-"))
+    os.environ["STEPCAP_STORAGE"] = str(st)
+    import app
+    assert app.STORAGE == st
+    (st / "g1").mkdir()
+    (st / "g1" / "guide.json").write_text(json.dumps(
+        {"id": "g1", "title": "t", "created": "2026-10-16T10:00:00", "steps": []}), encoding="utf-8")
+    bad = str(st / "no" / "such" / "x.html")
+    app.WINDOW = type("W", (), {"create_file_dialog": lambda self, *a, **k: (bad,)})()
+    for fmt, body in (("html", b"<html></html>"), ("md", b'{"images": {}}')):
+        assert app.export_guide("g1", fmt, body) == {"saved": None, "error": "บันทึกไฟล์ไม่ได้"}
+    assert app.download_image("g1", "1", "png", PNG) == {"saved": None, "error": "บันทึกไฟล์ไม่ได้"}
+
+
 if __name__ == "__main__":
     import traceback
     sys.stdout.reconfigure(encoding="utf-8")

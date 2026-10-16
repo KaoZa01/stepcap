@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import webview
 
+import exporters
 import library
 import overlay
 import recorder
@@ -245,7 +246,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"id": new}) if new else self._missing()
         if action == "export":
             fmt = qs.get("format", ["html"])[0]
-            if fmt not in ("html", "pdf"):
+            if fmt not in EXPORT_TYPES:
                 return self._send(400, "bad format", "text/plain")
             return self._json(export_guide(gid, fmt, body))
         if action == "redact":
@@ -259,8 +260,7 @@ class Handler(BaseHTTPRequestHandler):
             if kind not in ("png", "gif"):
                 return self._send(400, "bad image", "text/plain")
             n = qs.get("n", [""])[0]
-            return self._json({"saved": download_image(
-                gid, n if n.isdigit() else "", kind, body)})
+            return self._json(download_image(gid, n if n.isdigit() else "", kind, body))
         data = _obj(body)
         if data is None:
             return self._send(400, "bad json", "text/plain")
@@ -481,11 +481,15 @@ def _file_title(gid: str) -> str | None:
     g = library.read_guide(STORAGE / gid)
     if g is None:
         return None
-    return re.sub(r'[\\/:*?"<>|]', "_", g.get("title") or "").strip() or "guide"
+    return exporters.safe_title(g.get("title") or "")
+
+
+SAVE_FAILED = {"saved": None, "error": "บันทึกไฟล์ไม่ได้"}
 
 
 def save_as(filename: str, data: bytes, file_type: str) -> str | None:
-    """Native Save As for bytes the page made; None when cancelled."""
+    """Native Save As for bytes the page made; None when cancelled, OSError
+    when the chosen place can't be written."""
     if WINDOW is None:
         return None
     # file_type stays ASCII: pywebview's filter parser rejects Thai marks
@@ -499,18 +503,57 @@ def save_as(filename: str, data: bytes, file_type: str) -> str | None:
     return str(path)
 
 
+# format -> (extension, Save As filter; ASCII only)
+EXPORT_TYPES = {"html": ("html", "HTML (*.html)"), "pdf": ("pdf", "PDF (*.pdf)"),
+                "md": ("zip", "ZIP (*.zip)"), "docx": ("docx", "Word (*.docx)")}
+
+
 def export_guide(gid: str, fmt: str, body: bytes) -> dict:
-    """{"saved": path | None} (None = cancelled), plus "error" when it failed."""
+    """{"saved": path | None} (None = cancelled), plus "error" when it failed.
+    html/pdf: body is the export HTML. md/docx: body is the page's finished
+    pictures, {"images": {step id: {"ext", "data": base64}}}; text comes from
+    the guide on disk."""
     title = _file_title(gid)
     if title is None:
         return {"saved": None, "error": "ไม่พบคู่มือนี้"}
-    if fmt == "pdf":
-        try:
+    ext, filt = EXPORT_TYPES[fmt]
+    try:
+        if fmt == "html":
+            data = body
+        elif fmt == "pdf":
             data = print_pdf(body.decode("utf-8"))
-        except Exception:
-            return {"saved": None, "error": "สร้าง PDF ไม่สำเร็จ"}
-        return {"saved": save_as(title + ".pdf", data, "PDF (*.pdf)")}
-    return {"saved": save_as(title + ".html", body, "HTML (*.html)")}
+        else:
+            guide = library.read_guide(STORAGE / gid)
+            images = _export_images(gid, guide, _obj(body) or {})
+            data = (exporters.build_markdown if fmt == "md" else exporters.build_docx)(guide, images)
+    except Exception:
+        return {"saved": None, "error": "สร้าง PDF ไม่สำเร็จ" if fmt == "pdf" else "สร้างไฟล์ไม่สำเร็จ"}
+    try:
+        return {"saved": save_as(f"{title}.{ext}", data, filt)}
+    except OSError:
+        return dict(SAVE_FAILED)
+
+
+def _export_images(gid: str, guide: dict, body: dict) -> dict[str, tuple[str, bytes]]:
+    """Step id -> (ext, bytes). PNGs are the page's finished (redacted) pictures;
+    a GIF is read from the guide folder, never taken from the request."""
+    import base64
+    sent = body.get("images") if isinstance(body.get("images"), dict) else {}
+    out = {}
+    for s in guide["steps"]:
+        item, image = sent.get(s.get("id")), s.get("image") or ""
+        if not isinstance(item, dict):
+            continue
+        if item.get("ext") == "gif":
+            f = STORAGE / gid / image
+            if image.lower().endswith(".gif") and library.safe_name(image) \
+                    and f.parent == STORAGE / gid and f.is_file():
+                out[s["id"]] = ("gif", f.read_bytes())
+        elif isinstance(item.get("data"), str):
+            data = base64.b64decode(item["data"])
+            if library.image_kind(data) == "png":
+                out[s["id"]] = ("png", data)
+    return out
 
 
 def print_pdf(html: str) -> bytes:
@@ -561,13 +604,16 @@ def print_pdf(html: str) -> bytes:
             f.unlink(missing_ok=True)
 
 
-def download_image(gid: str, n: str, kind: str, data: bytes) -> str | None:
+def download_image(gid: str, n: str, kind: str, data: bytes) -> dict:
     """One step's finished image (PNG, or the original GIF)."""
     title = _file_title(gid)
     if title is None:
-        return None
+        return {"saved": None, "error": "ไม่พบคู่มือนี้"}
     name = f"{title} - ขั้นตอน {n}.{kind}" if n else f"{title}.{kind}"
-    return save_as(name, data, f"{kind.upper()} (*.{kind})")
+    try:
+        return {"saved": save_as(name, data, f"{kind.upper()} (*.{kind})")}
+    except OSError:
+        return dict(SAVE_FAILED)
 
 
 # ---------------------------------------------------------------------------

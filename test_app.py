@@ -361,6 +361,26 @@ def test_export_pdf():
     assert not list(tmp.glob("print-*")), list(tmp.glob("print-*"))
 
 
+def test_export_md_and_docx():
+    import zipfile
+    from io import BytesIO
+    png = _img("PNG")
+    body = json.dumps({"images": {"s1": {"ext": "png",
+                                         "data": base64.b64encode(png).decode()}}}).encode()
+    z = CTX["storage"] / "x.zip"
+    r = _export_to("export?format=md", body, z, ".zip")
+    assert Path(r["saved"]).resolve() == z.resolve(), r
+    with zipfile.ZipFile(z) as f:
+        names = f.namelist()
+        assert any(n.endswith(".md") for n in names) and f.read("images/step-01.png") == png, names
+    d = CTX["storage"] / "x.docx"
+    r = _export_to("export?format=docx", body, d, ".docx")
+    assert Path(r["saved"]).resolve() == d.resolve(), r
+    import docx
+    assert len(docx.Document(str(d)).inline_shapes) == 1
+    assert post(f"/api/guide/{OLD_ID}/export?format=nope", b"x") == 400
+
+
 def test_upload_and_content_types():
     png, gif = _img("PNG"), _img("GIF")
     steps_before = get(f"/api/guide/{OLD_ID}")["steps"]
@@ -408,6 +428,7 @@ TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_library_routes, test_redact_settings_route, test_redact_route,
          test_ui_served, test_export_save_as,
          test_upload_and_content_types, test_download_save_as, test_export_pdf,
+         test_export_md_and_docx,
          test_shutdown_not_blocked]
 
 if __name__ == "__main__":
