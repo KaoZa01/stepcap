@@ -117,6 +117,9 @@ def seed(st: Path):
     ], settings={"click_color": ORANGE})
     (st / "zzbad").mkdir()
     (st / "zzbad" / "guide.json").write_text('{"id": "zzbad", "ti', encoding="utf-8")
+    _guide(st, "textonly", [  # no pictures: the edit tour has no image-editor stop here
+        {"id": "t1", "kind": "click", "text": "one", "image": None, "crop": None, "markers": []},
+        {"id": "t2", "kind": "click", "text": "two", "image": None, "crop": None, "markers": []}])
     # tours already seen and no sample guide: the older tests never meet either
     (st / "settings.json").write_text(json.dumps({"tours_seen": ["home", "edit"], "sample_added": True}),
                                       encoding="utf-8")
@@ -944,6 +947,37 @@ def test_home_has_no_first_run_list():
     assert got == [True, None], got
 
 
+def test_edit_tour_stops_and_skips():
+    page("guide=noise&mode=edit")
+    _reset_tours()
+    page("guide=noise&mode=edit")
+    got = js(_until("document.querySelector('.tour-box')") +
+             "const c = () => document.querySelector('.tour-count').textContent, seen = [c()];"
+             "for (let i = 0; i < 4; i++) { document.querySelector('[data-t=next]').click(); seen.push(c()); }"
+             "const last = document.querySelector('[data-t=next]').textContent.trim();"
+             "document.querySelector('[data-t=next]').click(); await new Promise(r => setTimeout(r, 400));"
+             "return [seen, last, (await getJSON('/api/settings')).tours_seen];")
+    assert got == [["1/5", "2/5", "3/5", "4/5", "5/5"], "เสร็จสิ้น", ["edit"]], got
+    _reset_tours()
+    page("guide=textonly&mode=edit")
+    assert js(_until("document.querySelector('.tour-box')") +
+              "const n = document.querySelector('.tour-count').textContent;"
+              "document.querySelector('[data-t=skip]').click(); return n;") == "1/4"
+
+
+def test_tour_esc_only_closes_tour():
+    page("guide=noise&mode=edit")
+    _reset_tours()
+    page("guide=noise&mode=edit")
+    got = js(_until("document.querySelector('.tour-box')") +
+             "popMenu(document.getElementById('exp'), [{label: 'x', run() {}}]);"
+             "document.querySelector('.tour-box button').focus();"
+             "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));"
+             "return [!!document.querySelector('.tour-box'), !!document.querySelector('.menu-pop')];")
+    assert got == [False, True], got
+    js("closePopMenu();")
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
          test_render_sections, test_failed_labels_in_document_order,
          test_create_page_failure_reported,
@@ -972,7 +1006,7 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_broken_guide_listed_and_open_says_why, test_sidebar_and_cards_keyboard,
          test_home_has_no_first_run_list, test_home_tour_first_time_only,
          test_home_tour_skips_missing_sample_and_follows_resize, test_tour_postponed,
-         test_settings_replay]
+         test_settings_replay, test_edit_tour_stops_and_skips, test_tour_esc_only_closes_tour]
 
 
 def run_all(holder):
