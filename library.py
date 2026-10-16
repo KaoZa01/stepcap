@@ -401,23 +401,42 @@ def _clean_settings(d: dict) -> dict:
     return out
 
 
-def ensure_lang(storage: Path, windows_thai: bool) -> str:
-    """The language to start in. Only a fresh storage (no settings.json, no
-    guide) takes it from Windows and saves it; anyone already using StepCap
-    stays Thai until they change it, and an unreadable settings.json is left
-    as it is."""
+def ensure_lang(storage: Path, windows_thai: bool, installer_lang: str | None = None) -> str:
+    """The language to start in. A language already saved stays. Otherwise
+    the one picked in the installer is saved and used; without it, a fresh
+    storage (no settings.json, no guide) takes it from Windows and saves it,
+    and anyone already using StepCap stays Thai. An unreadable settings.json
+    is left as it is."""
     f = storage / "settings.json"
+    raw = {}
     if f.exists():
         try:
             raw = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return "th"
-        return raw.get("lang") if isinstance(raw, dict) and raw.get("lang") in i18n.LANGS else "th"
-    if storage.is_dir() and any((p / "guide.json").exists() for p in storage.iterdir() if p.is_dir()):
+        if not isinstance(raw, dict):
+            return "th"
+    if raw.get("lang") in i18n.LANGS:
+        return raw["lang"]
+    if installer_lang in i18n.LANGS:
+        save_settings(storage, lang=installer_lang)
+        return installer_lang
+    if f.exists() or (storage.is_dir() and any(
+            (p / "guide.json").exists() for p in storage.iterdir() if p.is_dir())):
         return "th"
     lang = "th" if windows_thai else "en"
     save_settings(storage, lang=lang)
     return lang
+
+
+def read_installer_lang(folder: Path) -> str | None:
+    """The language picked in the installer, which leaves it in lang.txt
+    next to StepCap.exe; None when there is none."""
+    try:
+        lang = (folder / "lang.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return lang if lang in i18n.LANGS else None
 
 
 def save_settings(storage: Path, **changes) -> dict:

@@ -646,6 +646,39 @@ def test_english_texts():
         assert doc["steps"][1]["text"] == "This guide was deleted"
 
 
+def test_ensure_lang_installer_choice():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d) / "fresh"
+        assert L.ensure_lang(st, True, "en") == "en"  # the installer beats Windows
+        assert L.load_settings(st)["lang"] == "en"
+        old = Path(d) / "old"  # a user from before languages: no lang saved yet
+        (old / "g1").mkdir(parents=True)
+        (old / "g1" / "guide.json").write_text("{}", encoding="utf-8")
+        assert L.ensure_lang(old, False, "en") == "en"
+        assert L.load_settings(old)["lang"] == "en"
+        assert L.ensure_lang(Path(d) / "fr", True, "fr") == "th"
+    for raw, want in ((b'{"lang": "th"}', "th"), (b'{"vi', "th")):
+        with tempfile.TemporaryDirectory() as d:
+            st = Path(d)
+            (st / "settings.json").write_bytes(raw)
+            assert L.ensure_lang(st, False, "en") == want
+            assert (st / "settings.json").read_bytes() == raw
+
+
+def test_read_installer_lang():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "lang.txt"
+        assert L.read_installer_lang(Path(d)) is None
+        for text, want in (("en\n", "en"), ("th", "th"), ("fr", None)):
+            f.write_text(text, encoding="utf-8")
+            assert L.read_installer_lang(Path(d)) == want, text
+        f.unlink()
+        f.mkdir()
+        assert L.read_installer_lang(Path(d)) is None
+
+
 def test_lang_setting_cleaned():
     import library as L
     with tempfile.TemporaryDirectory() as d:

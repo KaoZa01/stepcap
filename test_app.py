@@ -502,6 +502,15 @@ def test_english_server_messages():
         post("/api/settings", {"lang": "th"})
 
 
+def test_running_mutex():
+    # the installer's AppMutex: it asks to close StepCap before replacing it
+    k = ctypes.windll.kernel32
+    k.OpenMutexW.restype = wintypes.HANDLE
+    h = k.OpenMutexW(0x00100000, False, "StepCapRunning")  # SYNCHRONIZE
+    assert h, "StepCapRunning mutex not held"
+    k.CloseHandle(h)
+
+
 def test_lang_route():
     assert post("/api/settings", {"lang": "fr"}) == 400
     try:
@@ -516,7 +525,7 @@ def test_lang_route():
 
 TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
-         test_library_routes, test_sample_route_and_settings, test_redact_settings_route, test_redact_route, test_lang_route, test_english_server_messages,
+         test_library_routes, test_sample_route_and_settings, test_redact_settings_route, test_redact_route, test_lang_route, test_english_server_messages, test_running_mutex,
          test_ui_served, test_export_save_as,
          test_upload_and_content_types, test_download_save_as, test_export_pdf,
          test_export_md_and_docx, test_page_routes, test_page_export_md,
