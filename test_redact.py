@@ -244,6 +244,22 @@ def test_page_doc_waits_for_redaction():
     assert app.page_doc("nope") == 404
 
 
+def test_page_keeps_redaction_warning():
+    # a guide that couldn't be checked must warn through its page too
+    import library
+    app = _app()
+    _pending_guide(app.STORAGE, "gwarn")
+    pid = library.create_page(app.STORAGE, "p")["id"]
+    library.add_guide_to_page(app.STORAGE, pid, "gwarn")
+    real = app.redact.available
+    app.redact.available = lambda: "ไม่มี OCR ภาษาอังกฤษในเครื่อง"
+    try:
+        notes = app.page_doc(pid).get("redact_notes")
+    finally:
+        app.redact.available = real
+    assert notes and "t" in notes[0] and "ไม่มี OCR" in notes[0], notes
+
+
 def test_available():
     from redact import available
     assert available() is None

@@ -593,6 +593,12 @@ def test_add_to_page_from_guide():
     assert msgs == ["เพิ่มลงใน มีที่หาย แล้ว", "มีอยู่ใน Page นี้แล้ว"], msgs
 
 
+def test_page_html_skips_deleted_guide():
+    html = js("const d = await getJSON('/api/page/pg2/doc');"
+              "return await buildExportHtml('', {doc: d});")
+    assert "ถูกลบแล้ว" not in html and "noise - test" in html
+
+
 def test_page_export_images_no_original():
     r = js("const d = await getJSON('/api/page/pg1/doc'); const x = await exportImages(d, '');"
            "const i = x.index.findIndex(e => e.id === 'noise.a1');"
@@ -686,7 +692,8 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_settings_page_redact, test_redact_cover_and_note,
          test_editor_redact_button, test_pasted_image_redacted, test_export_menu_formats,
          test_pages_list, test_page_view_numbering, test_page_view_missing_guide,
-         test_page_export_images_no_original, test_page_edit_add_and_move,
+         test_page_export_images_no_original, test_page_html_skips_deleted_guide,
+         test_page_edit_add_and_move,
          test_add_to_page_from_guide]
 
 

@@ -208,6 +208,7 @@ async function buildExportHtml(gid, {print = false, failed = [], doc = null} = {
   const g = doc || await getJSON("/api/guide/" + encodeURIComponent(gid));
   const label = stepLabels(g), steps = [];
   for (const s of g.steps) {
+    if (s.kind === "section" && s.missing) continue;  // a deleted guide: left out of the file
     const c = {...s}, home = s.gid || gid;  // a page's steps come from several guides
     try {
       if (s.image && isGif(s)) {
@@ -289,11 +290,11 @@ async function exportDoc(kind, id, format = "html") {
   const base = `/api/${kind}/${encodeURIComponent(id)}`, failed = [];
   const busy = {error: kind === "page" ? "คู่มือใน Page นี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง"
     : "คู่มือนี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง"};
-  let r;
+  let r, doc;
   try {
     const src = await api(kind === "page" ? base + "/doc" : base);
     if (!src.ok) throw src.status === 409 ? busy : new Error(src.status);
-    const doc = await src.json();
+    doc = await src.json();
     let body, type = "text/html; charset=utf-8";
     if (format === "html" || format === "pdf") {
       body = await buildExportHtml(id, {print: format === "pdf", failed, doc});
@@ -317,6 +318,7 @@ async function exportDoc(kind, id, format = "html") {
   const notes = [];
   if (failed.length) notes.push(`ภาพของขั้นที่ ${failed.join(", ")} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ`);
   if (r.skipped) notes.push(`ข้ามคู่มือที่ถูกลบ ${r.skipped} อัน`);
+  for (const n of doc?.redact_notes || []) notes.push(n);  // a guide its pass couldn't cover
   toast(notes.length ? "บันทึกไฟล์แล้ว แต่" + notes.join(" และ") : "บันทึกไฟล์แล้ว", notes.length ? 8000 : 2500);
 }
 

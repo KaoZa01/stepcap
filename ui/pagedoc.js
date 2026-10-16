@@ -44,6 +44,7 @@ function pageView() {
   const doc = {...PG, steps: PG.steps.map(s => s.image ? {...s, _src: imgUrl(s.gid, s.image)} : s)};
   renderGuide(doc, document.getElementById("rg"));
   startStatusPoll(() => {}, 1000);
+  if (PG.redact_notes?.length) toast(PG.redact_notes.join(" · "), 10000);
 }
 
 // ---- edit

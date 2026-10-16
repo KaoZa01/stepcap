@@ -344,7 +344,7 @@ DEFAULT_PAGE_SETTINGS = {"toc": True, "step_count": False, "created": False,
 def _is_page(d) -> bool:
     if not isinstance(d, dict) or not isinstance(d.get("sections"), list):
         return False
-    if not all(isinstance(d.get(k, ""), str) for k in ("title", "description")):
+    if not all(isinstance(d.get(k, ""), str) for k in ("title", "description", "created", "updated")):
         return False
     if not isinstance(d.get("settings", {}), dict):
         return False

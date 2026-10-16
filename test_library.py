@@ -348,6 +348,8 @@ def test_list_pages_skips_bad():
         good = L.create_page(st, "ok")["id"]
         (st / "_pages" / "bad.json").write_text("{oops", encoding="utf-8")
         (st / "_pages" / "worse.json").write_text('{"title": "x", "sections": 5}', encoding="utf-8")
+        (st / "_pages" / "odd.json").write_text('{"title": "b", "sections": [], "updated": 5}',
+                                                encoding="utf-8")
         assert [p["id"] for p in L.list_pages(st)] == [good]
         assert L.read_page(st, "bad") is None and L.read_page(st, "worse") is None
 

@@ -581,15 +581,17 @@ def page_doc(pid: str) -> dict | int:
     page = library.read_page(STORAGE, pid)
     if page is None:
         return 404
-    guides = {}
+    guides, notes = {}, []
     for s in page["sections"]:
         if s["type"] == "guide":
             g = guide_for_page(s["guide"])
             if g == 409:
                 return 409
             guides[s["guide"]] = g if isinstance(g, dict) else None
+            if isinstance(g, dict) and g.get("redact_note"):  # never lose a redaction warning
+                notes.append(f"{g.get('title') or s['guide']}: {g['redact_note']}")
     doc, missing = library.compile_page(page, guides)
-    return {**doc, "missing": missing}
+    return {**doc, "missing": missing, "redact_notes": notes}
 
 
 def _export(title: str, fmt: str, body: bytes, load, gid: str) -> dict:
