@@ -936,6 +936,38 @@ def test_settings_add_sample():
     assert got[0] and got[1].startswith("ตัวอย่าง:") and "เพิ่มคู่มือตัวอย่างแล้ว" in got[2], got
 
 
+def test_tour_gives_way_to_recording_and_cover():
+    # an open tour must not cover the stop buttons or sit on the redaction cover
+    page("page=home")
+    _reset_tours()
+    page("page=home")
+    got = js(_until("document.querySelector('.tour-box')") +
+             "redactCover([0, 0]); const a = !!document.querySelector('.tour-box'); redactCover(null);"
+             "await new Promise(r => setTimeout(r, 400));"
+             "return [a, (await getJSON('/api/settings')).tours_seen];")
+    assert got == [False, []], got  # closed, and not counted as seen
+    page("page=home")
+    got = js(_until("document.querySelector('.tour-box')") +
+             "const f = window.fetch; window.fetch = async (u, o) => String(u).startsWith('/api/status')"
+             " ? new Response(JSON.stringify({recording: true, paused: false, steps: [], pending: null,"
+             "   hooks_ok: true, monitors: [], selected: 0, guide_seq: SEQ})) : f(u, o);"
+             "await TICK(); window.fetch = f; await new Promise(r => setTimeout(r, 400));"
+             "return [!!document.querySelector('.tour-box'), (await getJSON('/api/settings')).tours_seen];")
+    assert got == [False, []], got
+
+
+def test_toast_shows_above_tour():
+    # the one-time "pictures not blurred" warning can arrive with the first edit tour
+    page("page=home")
+    _reset_tours()
+    page("page=home")
+    got = js(_until("document.querySelector('.tour-box')") +
+             "toastErr('NOTE', 5000); const t = document.querySelector('#toasts .toast').getBoundingClientRect();"
+             "const top = document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2);"
+             "document.querySelector('[data-t=skip]').click(); return top?.textContent;")
+    assert got == "NOTE", got
+
+
 def test_home_has_no_first_run_list():
     page("page=home")
     # an empty library used to show a 3-step list here; the tour does that job now
@@ -1007,7 +1039,7 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_home_has_no_first_run_list, test_home_tour_first_time_only,
          test_home_tour_skips_missing_sample_and_follows_resize, test_tour_postponed,
          test_settings_replay, test_edit_tour_stops_and_skips, test_tour_esc_only_closes_tour,
-         test_settings_add_sample]
+         test_settings_add_sample, test_tour_gives_way_to_recording_and_cover, test_toast_shows_above_tour]
 
 
 def run_all(holder):

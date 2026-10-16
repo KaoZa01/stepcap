@@ -512,6 +512,53 @@ def test_add_sample_makes_new_copies():
         assert a and b and a != b and len(list_guides(st)) == 2
 
 
+def test_ensure_sample_settings_write_fails():
+    # copied but the flag can't be saved: no copy is kept, or every launch adds one
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        src, st = _fake_sample(root), root / "store"
+        real = L.save_settings
+
+        def broken(*a, **k):
+            raise OSError("locked")
+        L.save_settings = broken
+        try:
+            assert L.ensure_sample(st, src) is None
+        finally:
+            L.save_settings = real
+        assert list_guides(st) == []
+
+
+def test_ensure_sample_leaves_corrupt_settings_alone():
+    # an unreadable settings.json is not a first launch: no sample, file untouched
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        src, st = _fake_sample(root), root / "store"
+        st.mkdir()
+        (st / "settings.json").write_text('{"redact_custom": ["acme"', encoding="utf-8")
+        assert L.ensure_sample(st, src) is None
+        assert (st / "settings.json").read_text(encoding="utf-8") == '{"redact_custom": ["acme"'
+        assert list_guides(st) == []
+
+
+def test_add_sample_never_touches_a_taken_folder():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        src, st = _fake_sample(root), root / "store"
+        st.mkdir()
+        _seed(st, "taken", title="งานของผู้ใช้")
+        real = L.new_id
+        L.new_id = lambda storage, now=None: "taken"  # made in the same second
+        try:
+            assert L.add_sample(st, src) is None
+        finally:
+            L.new_id = real
+        assert _load(st, "taken")["title"] == "งานของผู้ใช้"
+
+
 def test_repo_sample_guide():
     from PIL import Image
     from library import SAMPLE_TITLE, image_kind, read_guide

@@ -32,6 +32,9 @@ const TOURS = {
 };
 
 let TOUR_OPEN = false;
+// Set while a tour is on screen: recording or the redaction cover closes it
+// (they need the stop buttons and the whole window), unseen, for next time.
+let TOUR_ABORT = null;
 
 // Shows a screen's tour if it's due, then remembers it was seen.
 async function maybeTour(name) {
@@ -44,7 +47,7 @@ async function maybeTour(name) {
     let s, st;
     try { [s, st] = await Promise.all([getJSON("/api/settings"), getJSON("/api/status")]); } catch { return; }
     if (s.tours_seen.includes(name) || st.recording || !due() || !stops[0].target()) return;
-    await runTour(stops);
+    if (!(await runTour(stops))) return;  // cut short: still due next time
     let seen = [];
     try { seen = (await getJSON("/api/settings")).tours_seen; } catch { /* keep going */ }
     await postOk("/api/settings", {tours_seen: [...new Set([...seen, name])]});
@@ -54,11 +57,12 @@ async function maybeTour(name) {
 }
 
 // Steps through stops ({target() -> Element|null, title, text}); a stop with
-// nothing to point at is left out. Resolves when skipped or finished.
+// nothing to point at is left out. Resolves true when skipped or finished,
+// false when TOUR_ABORT cut it short.
 function runTour(stops) {
   return new Promise(resolve => {
     const live = stops.filter(s => s.target());
-    if (!live.length) return resolve();
+    if (!live.length) return resolve(false);
     const opener = document.activeElement;
     const mk = cls => Object.assign(document.createElement("div"), {className: cls});
     const shade = mk("tour-shade"), ring = mk("tour-ring"), box = mk("tour-box");
@@ -112,14 +116,17 @@ function runTour(stops) {
         bs[(at + (e.shiftKey ? -1 : 1) + bs.length) % bs.length].focus();
       }
     };
-    function close() {
+    const finish = done => {
+      TOUR_ABORT = null;
       removeEventListener("keydown", keys, true);
       removeEventListener("resize", place);
       removeEventListener("scroll", place, true);
       shade.remove(); ring.remove(); box.remove();
       if (opener?.isConnected) opener.focus?.();
-      resolve();
-    }
+      resolve(done);
+    };
+    function close() { finish(true); }
+    TOUR_ABORT = () => finish(false);
     addEventListener("keydown", keys, true);
     addEventListener("resize", place);
     addEventListener("scroll", place, true);

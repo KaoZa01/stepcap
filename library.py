@@ -264,8 +264,10 @@ def add_sample(storage: Path, src: Path) -> str | None:
     dst = None
     try:
         storage.mkdir(parents=True, exist_ok=True)
-        dst = storage / new_id(storage)
-        shutil.copytree(src, dst)
+        cand = storage / new_id(storage)
+        cand.mkdir()  # taken meanwhile (a guide made in the same second): raises, nothing of ours to undo
+        dst = cand
+        shutil.copytree(src, dst, dirs_exist_ok=True)
         g = _load_raw(dst)
         if g is None:
             raise OSError("not a guide")
@@ -284,11 +286,25 @@ def ensure_sample(storage: Path, src: Path) -> str | None:
     """The sample guide, once per storage: after a copy that worked, never
     again (a user who deletes it keeps it deleted). A failed copy retries
     on the next launch."""
+    f = storage / "settings.json"
+    if f.exists():
+        # unreadable is not "first launch": no sample, and the file is left as
+        # it is (rewriting it would wipe the user's other settings)
+        try:
+            ok = isinstance(json.loads(f.read_text(encoding="utf-8")), dict)
+        except (OSError, ValueError):
+            ok = False
+        if not ok:
+            return None
     if load_settings(storage)["sample_added"]:
         return None
     gid = add_sample(storage, src)
     if gid:
-        save_settings(storage, sample_added=True)
+        try:
+            save_settings(storage, sample_added=True)
+        except OSError:  # unrecorded, it would be copied again next launch
+            shutil.rmtree(storage / gid, ignore_errors=True)
+            return None
     return gid
 
 

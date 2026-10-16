@@ -216,6 +216,7 @@ function startStatusPoll(onStatus, ms, beforeLeave) {
   TICK = async () => {
     let st;
     try { st = await getJSON("/api/status"); } catch { return; }
+    if (st.recording && typeof TOUR_ABORT === "function") TOUR_ABORT();  // ui/tour.js
     onStatus(st);
     if (!COVER_HOLD) redactCover(st.redacting);
     if (SEQ === null) { SEQ = st.guide_seq; return; }
@@ -240,6 +241,7 @@ function redactCover(r) {
     if (el !== c && el.id !== "toasts")
       el.inert = on || (el.id === "app" && typeof IED !== "undefined" && IED.open); };
   if (!r) { if (c) { c.remove(); c = null; inert(false); } return; }
+  if (typeof TOUR_ABORT === "function") TOUR_ABORT();  // the cover owns the window
   if (!c) {
     document.activeElement?.blur?.();
     c = document.createElement("div");
