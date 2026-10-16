@@ -33,6 +33,15 @@ def test_password_hides_text():
     assert "secret" not in out[0]["text"]
 
 
+def test_mask_typed_text():
+    b = StepBuilder(mask=lambda t: t.replace("me@x.co", "•••"))
+    for ch in "me@x.co":
+        b.add_key(ch, None, "", False)
+    assert b.pending_text() == 'พิมพ์ "•••"'  # live list is masked too
+    b.add_key(None, "Enter", "", False)
+    assert _typed(b) == ['พิมพ์ "•••" แล้วกด Enter']
+
+
 def test_field_change_splits():
     b = StepBuilder()
     b.add_key("a", None, "ชื่อ", False)

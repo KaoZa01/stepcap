@@ -141,6 +141,7 @@ async function guidePage(id, mode) {
   }
   document.title = "StepCap - " + STATE.title;
   if (mode === "edit") editPage(); else viewPage();
+  if (Q.get("note")) toast(Q.get("note"), 8000);  // what auto-redaction could not cover
 }
 
 function viewPage() {

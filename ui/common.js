@@ -87,11 +87,11 @@ async function uiConfirm(message, okLabel) {
     okLabel ? "red" : "dark"));
 }
 
-function toast(text) {
+function toast(text, ms = 2500) {
   const t = document.createElement("div");
   t.className = "toast"; t.textContent = text;
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2500);
+  setTimeout(() => t.remove(), ms);
 }
 
 // Small menu anchored under a button; closes on outside click or Esc.
@@ -135,17 +135,30 @@ function startStatusPoll(onStatus, ms, beforeLeave) {
     let st;
     try { st = await getJSON("/api/status"); } catch { return; }
     onStatus(st);
+    redactCover(st.redacting);
     if (SEQ === null) { SEQ = st.guide_seq; return; }
     if (st.guide_seq !== SEQ && st.last_guide) {
       SEQ = st.guide_seq;
       clearInterval(POLL);
       if (beforeLeave && (await beforeLeave()) === false) return;  // keep unsaved edits
-      goGuide(st.last_guide, "edit");
+      nav({guide: st.last_guide, mode: "edit", ...(st.redact_note ? {note: st.redact_note} : {})});
     }
   };
   clearInterval(POLL);
   TICK();
   POLL = setInterval(TICK, ms);
+}
+// While a new recording is auto-redacted the whole window is covered: the
+// guide must not be opened or exported before its blurs are in.
+function redactCover(r) {
+  let c = document.getElementById("redcover");
+  if (!r) { c?.remove(); return; }
+  if (!c) {
+    c = document.createElement("div");
+    c.id = "redcover";
+    document.body.appendChild(c);
+  }
+  c.textContent = r[1] ? `กำลังซ่อนข้อมูล… ${r[0]}/${r[1]}` : "กำลังซ่อนข้อมูล…";
 }
 // timers in a minimized or hidden window are throttled; catch up when shown
 document.addEventListener("visibilitychange", () => { if (!document.hidden && TICK) TICK(); });

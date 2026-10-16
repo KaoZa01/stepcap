@@ -91,6 +91,29 @@ def test_unreadable_image_raises():
         pass
 
 
+def test_redact_guide_marks_and_reports():
+    import json
+    from redact import redact_guide
+    st = TMP / "store"
+    (st / "g1").mkdir(parents=True)
+    (st / "g1" / "a.png").write_bytes(b"png")
+    (st / "g1" / "c.gif").write_bytes(b"gif")
+    guide = {"id": "g1", "steps": [
+        {"id": "s1", "image": "a.png", "redactions": []},
+        {"id": "n", "kind": "note", "image": None},          # not an image step
+        {"id": "s2", "image": "c.gif", "redactions": []},
+        {"id": "s3", "image": "gone.png", "redactions": []}]}
+    seen = []
+    rect = {"type": "blur", "x": 1, "y": 2, "w": 3, "h": 4}
+    failed = redact_guide(st, guide, RULES, [], progress=lambda d, n: seen.append((d, n)),
+                          find=lambda p, r, c: [rect])
+    assert failed == [2, 3], failed     # numbered like the page: notes don't count
+    assert guide["steps"][0]["redactions"] == [rect]
+    disk = json.loads((st / "g1" / "guide.json").read_text(encoding="utf-8"))
+    assert disk["steps"][0]["redactions"] == [rect]
+    assert seen[-1] == (3, 3), seen
+
+
 def test_available():
     from redact import available
     assert available() is None

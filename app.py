@@ -269,6 +269,8 @@ PORT = 0
 refresh_state = lambda: None
 GUIDE_SEQ = 0          # bumps on every stop that produced a guide
 LAST_GUIDE = None      # id of that guide; open pages navigate to it
+REDACTING = None       # [done, total] while a new guide is being auto-redacted
+REDACT_NOTE = None     # what the new guide's page says about that pass, if anything
 _HWND = None
 _MUTEX = None
 
@@ -314,19 +316,56 @@ def start_rec_ui():
 
 
 def stop_rec_ui():
-    global GUIDE_SEQ, LAST_GUIDE
+    global REDACTING
     guide = REC.stop_recording()
     OV.hide_panel()
     h = main_hwnd()
     recorder.set_capture_excluded(h, False)
     if guide:
-        # the page sees guide_seq change and opens the new guide in edit mode
-        LAST_GUIDE, GUIDE_SEQ = guide["id"], GUIDE_SEQ + 1
+        cfg = library.load_settings(STORAGE)
+        if cfg["redact_on"]:
+            # the guide only opens once its images are checked, so nothing
+            # can be exported before the blurs are in
+            REDACTING = [0, 0]
+            threading.Thread(target=_redact_then_open, args=(guide, cfg),
+                             daemon=True).start()
+        else:
+            _open_new(guide, None)
         show_main()
     elif h and user32.IsWindowVisible(h) and user32.IsIconic(h):
         user32.ShowWindowAsync(h, recorder.SW_RESTORE)
     refresh_state()
     return guide
+
+
+def _redact_then_open(guide: dict, cfg: dict):
+    global REDACTING
+    note = None
+    err = redact.available()
+    if err:
+        note = f"ไม่ได้ซ่อนข้อมูลอัตโนมัติ: {err}"
+    else:
+        def progress(done, total):
+            global REDACTING
+            REDACTING = [done, total]
+        try:
+            failed = redact.redact_guide(STORAGE, guide, cfg["redact_rules"],
+                                         cfg["redact_custom"], progress)
+            if failed:
+                note = (f"ซ่อนข้อมูลไม่สำเร็จ {len(failed)} ภาพ (ขั้นที่ "
+                        f"{', '.join(map(str, failed))}) ตรวจเองก่อนส่ง")
+        except Exception:
+            note = "ซ่อนข้อมูลอัตโนมัติไม่สำเร็จ ตรวจภาพเองก่อนส่ง"
+    REDACTING = None
+    _open_new(guide, note)
+
+
+def _open_new(guide: dict, note: str | None):
+    global GUIDE_SEQ, LAST_GUIDE, REDACT_NOTE
+    # the page sees guide_seq change and opens the new guide in edit mode
+    REDACT_NOTE = note
+    LAST_GUIDE, GUIDE_SEQ = guide["id"], GUIDE_SEQ + 1
+    refresh_state()
 
 
 def pause_ui():
@@ -368,6 +407,7 @@ def rec_status() -> dict:
             "selected": REC.selected, "monitors": mons,
             "hooks_ok": REC.hooks_ok, "hook_error": REC.hook_error,
             "guide_seq": GUIDE_SEQ, "last_guide": LAST_GUIDE,
+            "redacting": REDACTING, "redact_note": REDACT_NOTE,
             **REC.live()}
 
 

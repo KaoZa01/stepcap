@@ -84,9 +84,10 @@ def _new_id() -> str:
 
 
 class _Typing:
-    def __init__(self, field: str, is_password: bool):
+    def __init__(self, field: str, is_password: bool, mask=None):
         self.field = field
         self.is_password = is_password
+        self.mask = mask or (lambda t: t)
         self.chars: list[str] = []
         self.ending: str | None = None
 
@@ -96,7 +97,7 @@ class _Typing:
                     if self.field else "พิมพ์รหัสผ่าน")
         else:
             where = f' ในช่อง "{self.field}"' if self.field else ""
-            body = f'พิมพ์ "{"".join(self.chars)}"{where}'
+            body = f'พิมพ์ "{self.mask("".join(self.chars))}"{where}'
         if self.ending:
             body += f" แล้วกด {self.ending}"
         return body
@@ -109,9 +110,11 @@ class _Typing:
 class StepBuilder:
     """Turns an ordered input stream into guide steps. Pure + deterministic."""
 
-    def __init__(self):
+    def __init__(self, mask=None):
+        """mask(typed text) -> text to keep; hides auto-redacted values."""
         self.steps: list[dict] = []
         self._typing: _Typing | None = None
+        self._mask = mask
 
     def _flush(self):
         if self._typing is not None:
@@ -162,7 +165,7 @@ class StepBuilder:
 
         # normal character
         if self._typing is None:
-            self._typing = _Typing(field, is_password)
+            self._typing = _Typing(field, is_password, self._mask)
         if char is not None and not self._typing.is_password:
             self._typing.chars.append(char)
 
@@ -508,7 +511,13 @@ class Recorder:
                 return False
             for f in (self.storage / "_tmp").glob("*.png"):
                 _discard(str(f))
-            self._builder = StepBuilder()
+            cfg = library.load_settings(self.storage)
+            mask = None
+            if cfg["redact_on"]:
+                import redact
+                rules, custom = cfg["redact_rules"], cfg["redact_custom"]
+                mask = lambda t: redact.mask_text(t, rules, custom)
+            self._builder = StepBuilder(mask)
             self.paused = False
             self._last_click = None
             self.recording = True

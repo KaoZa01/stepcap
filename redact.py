@@ -174,7 +174,11 @@ def ocr_lines(path: Path) -> list[list[tuple[str, tuple[float, float, float, flo
     bmp = SoftwareBitmap.create_copy_from_buffer(
         w.detach_buffer(), BitmapPixelFormat.BGRA8, img.width, img.height)
     with _LOCK:
-        res = asyncio.run(_recognize(_engine(), bmp))
+        eng = _engine()
+        try:
+            res = asyncio.run(_recognize(eng, bmp))
+        except Exception:
+            raise RedactError("อ่านตัวอักษรในภาพไม่สำเร็จ")
     return [[(wd.text, (wd.bounding_rect.x / s, wd.bounding_rect.y / s,
                         wd.bounding_rect.width / s, wd.bounding_rect.height / s))
              for wd in line.words] for line in res.lines]
@@ -192,3 +196,34 @@ def find_rects(path: Path, rules: Iterable[str], custom: Iterable[str]) -> list[
         size = im.size
     rules, custom = list(rules), list(custom)
     return [r for ln in lines for r in line_rects(ln, rules, custom, size)]
+
+
+def redact_guide(storage: Path, guide: dict, rules: Iterable[str], custom: Iterable[str],
+                 progress=None, find=find_rects) -> list[int]:
+    """Blur matches in every image step of a guide on disk, write guide.json
+    once, and return the step numbers (as the page numbers them: notes don't
+    count) whose image could not be checked: GIF, missing, unreadable."""
+    import library
+    folder = storage / guide["id"]
+    rules, custom = list(rules), list(custom)
+    todo, n = [], 0
+    for s in guide["steps"]:
+        if s.get("kind") != "note":
+            n += 1
+            if s.get("image"):
+                todo.append((n, s))
+    failed = []
+    for i, (num, s) in enumerate(todo, 1):
+        p = folder / s["image"]
+        if p.suffix.lower() == ".gif" or not p.is_file():
+            failed.append(num)
+        else:
+            try:
+                s["redactions"] = (s.get("redactions") or []) + new_rects(
+                    find(p, rules, custom), s.get("redactions") or [])
+            except RedactError:
+                failed.append(num)
+        if progress:
+            progress(i, len(todo))
+    library.write_json_atomic(folder / "guide.json", guide)
+    return failed

@@ -446,6 +446,14 @@ def test_settings_page_redact():
     assert "card" not in js("return (await getJSON('/api/settings')).redact_rules;")
 
 
+def test_redact_cover_and_note():
+    page("guide=noise&mode=edit&note=" + "ซ่อนข้อมูลไม่สำเร็จ%201%20ภาพ")
+    assert "ซ่อนข้อมูลไม่สำเร็จ 1 ภาพ" in js("return document.querySelector('.toast')?.textContent;")
+    assert js("redactCover([2, 5]); return document.getElementById('redcover').textContent;") \
+        == "กำลังซ่อนข้อมูล… 2/5"
+    assert js("redactCover(null); return document.getElementById('redcover');") is None
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
@@ -456,7 +464,7 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_repeated_paste_from_caption_box, test_gif_stays_locked_after_undo,
          test_ring_takes_custom_colour, test_ctrl_z_with_thai_layout,
          test_resize_redaction_after_release, test_colour_picked_before_drawing,
-         test_settings_page_redact]
+         test_settings_page_redact, test_redact_cover_and_note]
 
 
 def run_all(holder):
