@@ -903,7 +903,8 @@ class Tray:
         mon_items = []
         for m in self.rec.monitors:
             w, h = m["right"] - m["left"], m["bottom"] - m["top"]
-            label = tr("จอ {n} ({w}×{h})", n=m["index"] + 1, w=w, h=h) + \
+            # a callable: worked out each time the menu opens, in the language then
+            label = lambda i, m=m, w=w, h=h: tr("จอ {n} ({w}×{h})", n=m["index"] + 1, w=w, h=h) + \
                 (tr(" หลัก") if m["primary"] else "")
             mon_items.append(p.MenuItem(
                 label, partial(self._pick_monitor, m["index"]),

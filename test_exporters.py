@@ -266,6 +266,22 @@ def test_safe_title_windows_names():
     assert safe_title("a\x07b. . ") == "a_b" and safe_title("...") == "guide"
 
 
+def test_tray_menu_follows_language():
+    # Settings switches the language while the tray icon lives on: every label
+    # in its menu, the screen list too, is worked out when the menu opens
+    import types
+    import i18n
+    app = _app()
+    rec = types.SimpleNamespace(recording=False, paused=False, selected=0, monitors=[
+        {"index": 0, "left": 0, "top": 0, "right": 1920, "bottom": 1080, "primary": True}])
+    tray = app.Tray(rec)
+    screens = lambda: [it.text for it in tray.icon.menu.items[1].submenu.items]
+    assert screens() == ["จอ 1 (1920×1080) หลัก"], screens()
+    with i18n.using("en"):
+        assert screens() == ["Screen 1 (1920×1080) · main"], screens()
+        assert tray.icon.menu.items[1].text == "Choose screen" and tray._title() == "StepCap - Idle"
+
+
 def test_export_write_error_reported():
     # Save As picked a place that can't be written: say so, don't pretend it saved
     import json
