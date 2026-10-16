@@ -2,6 +2,7 @@
 plus read-only Win32 queries. The only message sent is WM_CLOSE to the test's
 own StepCap window; no clicks or typing are synthesized. Windows only.
 Run: python test_app.py"""
+import base64
 import ctypes
 import json
 import shutil
@@ -335,6 +336,31 @@ def test_export_save_as():
     assert target.read_text(encoding="utf-8") == "<html>สวัสดี</html>"
 
 
+def _export_to(route: str, body: bytes, target: Path, ext: str) -> dict:
+    """POST an export, type `target` into the app's own Save As, return the reply."""
+    t, out = export_async(OLD_ID, body, route=route)
+    dlg = wait(lambda: save_dialog(CTX["pid"]), 30)
+    assert dlg, "no Save As dialog appeared"
+    box = next(e for e in child_edits(dlg) if edit_text(e).endswith(ext))
+    U.SendMessageW(box, WM_SETTEXT, 0, str(target))
+    U.PostMessageW(dlg, WM_COMMAND, 1, 0)  # IDOK
+    t.join(60)
+    return out["r"]
+
+
+def test_export_pdf():
+    png = base64.b64encode(_img("PNG")).decode()
+    html = (f'<!doctype html><html lang="th"><meta charset="utf-8"><body><h1>คู่มือทดสอบ</h1>'
+            f'<img src="data:image/png;base64,{png}"></body></html>').encode("utf-8")
+    target = CTX["storage"] / "x.pdf"
+    r = _export_to("export?format=pdf", html, target, ".pdf")
+    assert Path(r["saved"]).resolve() == target.resolve(), r
+    data = target.read_bytes()
+    assert data.startswith(b"%PDF") and b"/Type /Page" in data
+    tmp = CTX["storage"] / "_tmp"
+    assert not list(tmp.glob("print-*")), list(tmp.glob("print-*"))
+
+
 def test_upload_and_content_types():
     png, gif = _img("PNG"), _img("GIF")
     steps_before = get(f"/api/guide/{OLD_ID}")["steps"]
@@ -381,7 +407,7 @@ TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
          test_library_routes, test_redact_settings_route, test_redact_route,
          test_ui_served, test_export_save_as,
-         test_upload_and_content_types, test_download_save_as,
+         test_upload_and_content_types, test_download_save_as, test_export_pdf,
          test_shutdown_not_blocked]
 
 if __name__ == "__main__":

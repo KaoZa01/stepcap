@@ -208,6 +208,14 @@ def test_export_contains_no_original():
     assert _black(img, range(20, 80), range(20, 60))
 
 
+def test_print_html_uses_img():
+    html = js("return await buildExportHtml('noise', {print: true});")
+    assert "@page" in html and "break-inside:avoid" in html, html[:400]
+    data = json.loads(re.search(r"const guide=(.*?);\n", html, re.S).group(1))
+    assert data["steps"][0]["_img"] is True  # baked picture shown as <img>, not canvas
+    assert "@page" not in js("return await buildExportHtml('noise');")
+
+
 def test_bake_redaction_across_crop():
     img = png(js("const g = await getJSON('/api/guide/cropx');"
                  "return __b64(await renderStepPng(g.steps[0], 'cropx'));"))
@@ -515,7 +523,7 @@ def test_pasted_image_redacted():
     assert len(js("return STATE.steps.at(-1).redactions;")) == 1
 
 
-TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
+TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
          test_image_paste_adds_step, test_broken_image_tolerated,

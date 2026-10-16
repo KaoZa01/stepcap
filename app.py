@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import time
 import threading
 import urllib.request
 from ctypes import wintypes
@@ -243,7 +244,10 @@ class Handler(BaseHTTPRequestHandler):
             new = library.duplicate_guide(STORAGE, gid)
             return self._json({"id": new}) if new else self._missing()
         if action == "export":
-            return self._json({"saved": export_guide(gid, body)})
+            fmt = qs.get("format", ["html"])[0]
+            if fmt not in ("html", "pdf"):
+                return self._send(400, "bad format", "text/plain")
+            return self._json(export_guide(gid, fmt, body))
         if action == "redact":
             return self._redact(gid, _obj(body))
         if action == "image":
@@ -495,9 +499,66 @@ def save_as(filename: str, data: bytes, file_type: str) -> str | None:
     return str(path)
 
 
-def export_guide(gid: str, html: bytes) -> str | None:
+def export_guide(gid: str, fmt: str, body: bytes) -> dict:
+    """{"saved": path | None} (None = cancelled), plus "error" when it failed."""
     title = _file_title(gid)
-    return save_as(title + ".html", html, "HTML (*.html)") if title else None
+    if title is None:
+        return {"saved": None, "error": "ไม่พบคู่มือนี้"}
+    if fmt == "pdf":
+        try:
+            data = print_pdf(body.decode("utf-8"))
+        except Exception:
+            return {"saved": None, "error": "สร้าง PDF ไม่สำเร็จ"}
+        return {"saved": save_as(title + ".pdf", data, "PDF (*.pdf)")}
+    return {"saved": save_as(title + ".html", body, "HTML (*.html)")}
+
+
+def print_pdf(html: str) -> bytes:
+    """The export HTML as an A4 PDF, printed by WebView2 in a hidden window of
+    our own (same text engine as the app, so Thai shapes right; no browser)."""
+    tmp = STORAGE / "_tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_hex(8)
+    src, pdf = tmp / f"print-{key}.html", tmp / f"print-{key}.pdf"
+    src.write_text(html, encoding="utf-8")
+    win = None
+    try:
+        win = webview.create_window("StepCap print", url=src.as_uri(), hidden=True)
+        if not win.events.loaded.wait(30):
+            raise RuntimeError("print page did not load")
+        end = time.time() + 30
+        while not win.evaluate_js("[...document.images].every(i => i.complete)"):
+            if time.time() > end:
+                raise RuntimeError("print images did not load")
+            time.sleep(0.1)
+        from System import Action
+        from System.Threading.Tasks import Task
+        done, res = threading.Event(), {}
+
+        def finished(t):
+            res["ok"] = not t.IsFaulted and t.Result
+            done.set()
+
+        def go():
+            try:
+                core = win.native.browser.webview.CoreWebView2
+                st = core.Environment.CreatePrintSettings()
+                st.PageWidth, st.PageHeight = 8.27, 11.69  # A4, inches
+                st.ShouldPrintBackgrounds = True
+                st.ShouldPrintHeaderAndFooter = False
+                core.PrintToPdfAsync(str(pdf), st).ContinueWith(
+                    Action[Task[bool]](finished))
+            except Exception:
+                done.set()
+        win.native.Invoke(Action(go))
+        if not done.wait(120) or not res.get("ok") or not pdf.is_file():
+            raise RuntimeError("PrintToPdf failed")
+        return pdf.read_bytes()
+    finally:
+        if win is not None:
+            win.destroy()
+        for f in (src, pdf):
+            f.unlink(missing_ok=True)
 
 
 def download_image(gid: str, n: str, kind: str, data: bytes) -> str | None:

@@ -114,8 +114,8 @@ async function renderGuide(guide, root) {
       div.innerHTML = '<div class="rg-note">' + E(step.text) + "</div>";
     } else {
       div.innerHTML = '<div class="rg-head"><div class="rg-num">' + (++n) + "</div><div>" + E(step.text) + "</div></div>";
-      if (step._src && (step._gif || /\.gif$/i.test(step.image || ""))) {
-        const gif = document.createElement("img");  // animated, shown as-is
+      if (step._src && (step._gif || step._img || /\.gif$/i.test(step.image || ""))) {
+        const gif = document.createElement("img");  // GIF animated as-is; _img: baked, for print
         gif.className = "rg-gif"; gif.alt = ""; gif.src = step._src;
         div.appendChild(gif);
       } else if (step._src) {
@@ -190,7 +190,8 @@ function renderStepPng(step, gid) {
 
 // One self-contained HTML file that looks like view mode. Every non-GIF image
 // is flattened first, so no original screenshot ever leaves the machine.
-async function buildExportHtml(gid) {
+// print: the PDF source -- pictures as <img> (print waits for them) and A4 CSS.
+async function buildExportHtml(gid, {print = false} = {}) {
   const g = await getJSON("/api/guide/" + encodeURIComponent(gid));
   const steps = [];
   for (const s of g.steps) {
@@ -203,6 +204,7 @@ async function buildExportHtml(gid) {
       } else if (s.image) {
         c._src = await asDataUrl(await renderStepPng(s, gid));
         Object.assign(c, {crop: null, markers: [], annotations: [], redactions: []});
+        if (print) c._img = true;
       }
     } catch {  // an unreadable image is exported without its picture
       delete c._src;
@@ -216,11 +218,14 @@ async function buildExportHtml(gid) {
   const css = document.getElementById("rg-css").textContent;
   return `<!doctype html><html lang="th"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(g.title)}</title>
-<style>body{margin:0;padding:32px 24px;background:#fff}${css}</style></head>
+<style>body{margin:0;padding:32px 24px;background:#fff}${css}${print ? PRINT_CSS : ""}</style></head>
 <body><div id="root"></div><script>const guide=${json};
 ${drawStepCanvas}
 (${renderGuide})(guide, document.getElementById("root"));<\/script></body></html>`;
 }
+
+const PRINT_CSS = "@page{size:A4;margin:14mm}body{padding:0}" +
+  ".rg-step{break-inside:avoid}.rg-step img{max-width:100%;height:auto}";
 
 // Saved via Save As.
 async function exportGuide(gid) {
