@@ -6,6 +6,7 @@ draws the highlight and docks the side panel.
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import queue
 import threading
@@ -104,7 +105,70 @@ class Session:
         return True
 
 
+PANEL_W = 360
+PANEL_TITLE = "StepCap Guide Me"  # also how the app finds the panel's window
+
+
+def panel_rect(mon: tuple, width: int = PANEL_W) -> tuple:
+    """The side panel's strip at the right edge of a monitor."""
+    return (mon[2] - width, mon[1], mon[2], mon[3])
+
+
 # -- Windows glue -------------------------------------------------------------
+class _APPBARDATA(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("hWnd", wintypes.HWND),
+                ("uCallbackMessage", wintypes.UINT), ("uEdge", wintypes.UINT),
+                ("rc", wintypes.RECT), ("lParam", wintypes.LPARAM)]
+
+
+_shell32 = ctypes.windll.shell32
+_shell32.SHAppBarMessage.argtypes = [wintypes.DWORD, ctypes.POINTER(_APPBARDATA)]
+_shell32.SHAppBarMessage.restype = ctypes.c_size_t
+recorder.user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                                         ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                         wintypes.UINT]
+_ABM_NEW, _ABM_REMOVE, _ABM_QUERYPOS, _ABM_SETPOS, _ABE_RIGHT = 0, 1, 2, 3, 2
+
+
+def _abd(hwnd) -> _APPBARDATA:
+    d = _APPBARDATA()
+    d.cbSize = ctypes.sizeof(_APPBARDATA)
+    d.hWnd = hwnd
+    d.uEdge = _ABE_RIGHT
+    d.uCallbackMessage = 0x0400 + 0x47  # WM_USER+n; the panel ignores it
+    return d
+
+
+def dock_right(hwnd, mon: tuple, width: int = PANEL_W) -> tuple | None:
+    """Reserve a strip at the monitor's right edge (as the taskbar does), so
+    maximised windows shrink beside it, and move the window into it."""
+    if not hwnd:
+        return None
+    d = _abd(hwnd)
+    _shell32.SHAppBarMessage(_ABM_NEW, ctypes.byref(d))
+    d.rc.left, d.rc.top, d.rc.right, d.rc.bottom = panel_rect(mon, width)
+    _shell32.SHAppBarMessage(_ABM_QUERYPOS, ctypes.byref(d))  # may move it off a taskbar
+    d.rc.left = d.rc.right - width
+    _shell32.SHAppBarMessage(_ABM_SETPOS, ctypes.byref(d))
+    r = (d.rc.left, d.rc.top, d.rc.right, d.rc.bottom)
+    HWND_TOPMOST, SWP_NOACTIVATE = -1, 0x10
+    recorder.user32.SetWindowPos(hwnd, HWND_TOPMOST, r[0], r[1], r[2] - r[0],
+                                 r[3] - r[1], SWP_NOACTIVATE)
+    return r
+
+
+def undock(hwnd):
+    if hwnd:
+        _shell32.SHAppBarMessage(_ABM_REMOVE, ctypes.byref(_abd(hwnd)))
+
+
+def monitor_of(mons: list[dict], pt: tuple[int, int]) -> dict:
+    """The monitor holding pt, else the primary."""
+    return next((m for m in mons if m["left"] <= pt[0] < m["right"]
+                 and m["top"] <= pt[1] < m["bottom"]),
+                next((m for m in mons if m["primary"]), mons[0]))
+
+
 _EXE: dict[int, str] = {}  # hwnd -> exe name; a window never changes process
 
 

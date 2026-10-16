@@ -157,6 +157,12 @@ def test_overlay_highlight_box_and_hide():
     ask(lambda: ov._root.quit())
 
 
+def test_panel_rect():
+    from guideme import panel_rect
+    assert panel_rect((0, 0, 1920, 1080)) == (1560, 0, 1920, 1080)
+    assert panel_rect((-1280, 0, 0, 1024)) == (-360, 0, 0, 1024)
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
