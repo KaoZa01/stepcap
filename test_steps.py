@@ -42,6 +42,13 @@ def test_mask_typed_text():
     assert _typed(b) == ['พิมพ์ "•••" แล้วกด Enter']
 
 
+def test_mask_field_name_too():
+    # some apps name an edit box after its current value
+    b = StepBuilder(mask=lambda t: t.replace("me@x.co", "•••"))
+    b.add_key("a", None, "me@x.co", False)
+    assert _typed(b) == ['พิมพ์ "a" ในช่อง "•••"']
+
+
 def test_field_change_splits():
     b = StepBuilder()
     b.add_key("a", None, "ชื่อ", False)

@@ -50,7 +50,17 @@ def test_md_layout():
 
 def test_md_escapes_text():
     assert md_escape("1. # a*b_c [x](y) <i> | `q` !") == \
-        "1. \\# a\\*b\\_c \\[x\\](y) \\<i\\> \\| \\`q\\` \\!"
+        "1\\. \\# a\\*b\\_c \\[x\\](y) \\<i\\> \\| \\`q\\` \\!"
+    assert md_escape("a & b ~~c~~ =") == "a \\& b \\~\\~c\\~\\~ \\="
+    # line starts that would turn a note into a list, rule or code block
+    assert md_escape("- a\n+ b\n2) c\n    d\n---") == "\\- a  \n\\+ b  \n2\\) c  \nd  \n\\---"
+
+
+def test_docx_metadata_is_guide_only():
+    from exporters import build_docx
+    cp = _doc(build_docx(G, {})).core_properties
+    assert cp.title == G["title"] and cp.author == "" and cp.comments == ""
+    assert cp.last_modified_by == "" and cp.created.year == 2026
 
 
 def test_md_no_images():
@@ -151,6 +161,12 @@ def test_export_images_binary_and_missing():
     assert images == {"s1": ("png", PNG)} and missing == [2, 3], (images, missing)
     images, missing = app._export_images("g2", guide, head.encode() + b"\n" + PNG[:10])
     assert images == {} and missing == [1, 2, 3], (images, missing)  # cut-off body
+
+
+def test_safe_title_windows_names():
+    from exporters import safe_title
+    assert safe_title("con") == "_con" and safe_title("NUL.txt") == "_NUL.txt"
+    assert safe_title("a\x07b. . ") == "a_b" and safe_title("...") == "guide"
 
 
 def test_export_write_error_reported():

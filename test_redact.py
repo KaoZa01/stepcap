@@ -63,6 +63,27 @@ def test_rects_email_split_by_ocr():
     assert mask_text("text me @x.co", ["email"], []) == "text me @x.co"  # typed text stays strict
 
 
+def test_rects_email_split_after_dot():
+    words = [("user@mail.", (0, 0, 80, 20)), ("com", (84, 0, 30, 20))]
+    assert line_rects(words, ["email"], [], (400, 100)) == \
+        [{"type": "blur", "x": 0, "y": 0, "w": 118, "h": 24}]
+
+
+def test_ocr_follows_exif_rotation():
+    # a phone JPEG stored sideways: rects must be in the upright picture the page draws
+    from PIL import Image, ImageDraw, ImageFont
+    from redact import find_rects
+    up = Image.new("RGB", (640, 120), "white")
+    ImageDraw.Draw(up).text((300, 40), "someone@example.com", fill="black",
+                            font=ImageFont.truetype("arial.ttf", 28))
+    exif = Image.Exif()
+    exif[0x0112] = 6  # viewer turns it 90° clockwise
+    p = TMP / "rot.jpg"
+    up.rotate(90, expand=True).save(p, "JPEG", quality=95, exif=exif)
+    r = find_rects(p, ["email"], [])
+    assert len(r) == 1 and 280 <= r[0]["x"] <= 310 and r[0]["y"] < 60, r
+
+
 def test_rects_clamped():
     r = line_rects([("me@x.co", (2, 1, 60, 18))], RULES, [], (60, 18))[0]
     assert (r["x"], r["y"], r["x"] + r["w"], r["y"] + r["h"]) == (0, 0, 60, 18)
