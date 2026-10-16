@@ -109,3 +109,86 @@ def new_rects(found: list[dict], existing: list[dict]) -> list[dict]:
                 and a["x"] + a["w"] <= b["x"] + b["w"]
                 and a["y"] + a["h"] <= b["y"] + b["h"])
     return [f for f in found if not any(inside(f, e) for e in existing)]
+
+
+# ---------------------------------------------------------------------------
+# Windows OCR glue (Windows.Media.Ocr via pywinrt; en-US only, no Thai)
+# ---------------------------------------------------------------------------
+import threading
+from pathlib import Path
+
+
+class RedactError(Exception):
+    """Message is Thai and shown to the user."""
+
+
+_LOCK = threading.Lock()  # ponytail: one OCR at a time; fine for a personal app
+_ENGINE = None
+
+
+def _engine():
+    global _ENGINE
+    if _ENGINE is None:
+        try:
+            from winrt.windows.globalization import Language
+            from winrt.windows.media.ocr import OcrEngine
+        except Exception:
+            raise RedactError("โหลดตัวอ่านตัวอักษรไม่ได้")
+        eng = OcrEngine.try_create_from_language(Language("en-US"))
+        if eng is None:
+            raise RedactError("ไม่มี OCR ภาษาอังกฤษในเครื่อง")
+        _ENGINE = eng
+    return _ENGINE
+
+
+def available() -> str | None:
+    """None when OCR works here, else the Thai reason it doesn't."""
+    try:
+        with _LOCK:
+            _engine()
+        return None
+    except RedactError as e:
+        return str(e)
+
+
+def ocr_lines(path: Path) -> list[list[tuple[str, tuple[float, float, float, float]]]]:
+    """Words of each OCR line with (x, y, w, h) in the file's own pixels."""
+    import asyncio
+    from PIL import Image
+    try:
+        with Image.open(path) as im:
+            img = im.convert("RGBA")
+    except Exception:
+        raise RedactError("อ่านภาพไม่ได้")
+    from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
+    from winrt.windows.media.ocr import OcrEngine
+    from winrt.windows.storage.streams import DataWriter
+    W, H = img.size
+    s = min(1.0, OcrEngine.max_image_dimension / max(W, H))
+    if s < 1:  # OCR refuses bigger images; rects are scaled back below
+        img = img.resize((max(1, int(W * s)), max(1, int(H * s))))
+    r, g, b, a = img.split()
+    data = Image.merge("RGBA", (b, g, r, a)).tobytes()  # BGRA8
+    w = DataWriter()
+    w.write_bytes(data)
+    bmp = SoftwareBitmap.create_copy_from_buffer(
+        w.detach_buffer(), BitmapPixelFormat.BGRA8, img.width, img.height)
+    with _LOCK:
+        res = asyncio.run(_recognize(_engine(), bmp))
+    return [[(wd.text, (wd.bounding_rect.x / s, wd.bounding_rect.y / s,
+                        wd.bounding_rect.width / s, wd.bounding_rect.height / s))
+             for wd in line.words] for line in res.lines]
+
+
+async def _recognize(engine, bmp):
+    return await engine.recognize_async(bmp)
+
+
+def find_rects(path: Path, rules: Iterable[str], custom: Iterable[str]) -> list[dict]:
+    """Blur rects for everything in the image that matches the rules."""
+    from PIL import Image
+    lines = ocr_lines(path)
+    with Image.open(path) as im:
+        size = im.size
+    rules, custom = list(rules), list(custom)
+    return [r for ln in lines for r in line_rects(ln, rules, custom, size)]

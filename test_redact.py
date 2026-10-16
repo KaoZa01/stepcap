@@ -1,7 +1,20 @@
 """Self-check for auto-redaction. Run: python test_redact.py"""
 import sys
+import tempfile
+from pathlib import Path
 
 from redact import RULES, find_spans, line_rects, mask_text, new_rects
+
+TMP = Path(tempfile.mkdtemp(prefix="stepcap-redact-"))
+
+
+def _text_png(text, size, at=(20, 20)):
+    from PIL import Image, ImageDraw, ImageFont
+    img = Image.new("RGB", size, "white")
+    ImageDraw.Draw(img).text(at, text, fill="black", font=ImageFont.truetype("arial.ttf", 28))
+    p = TMP / f"{abs(hash((text, size, at)))}.png"
+    img.save(p)
+    return p
 
 
 def test_email_and_custom():
@@ -50,6 +63,37 @@ def test_new_rects_skips_covered():
     a = {"type": "blur", "x": 10, "y": 10, "w": 50, "h": 20}
     assert new_rects([a], [{"type": "black", "x": 0, "y": 0, "w": 100, "h": 100}]) == []
     assert new_rects([a], []) == [a]
+
+
+def test_ocr_finds_email_rect():
+    from redact import find_rects
+    p = _text_png("contact: someone@example.com", (640, 80))
+    rs = find_rects(p, RULES, [])
+    assert len(rs) == 1 and rs[0]["x"] < 160 < rs[0]["x"] + rs[0]["w"], rs
+    assert rs[0]["x"] > 100, rs  # "contact:" stays readable
+
+
+def test_ocr_large_image_scales_back():
+    from redact import find_rects
+    p = _text_png("0812345678", (12000, 300), at=(11000, 200))
+    r = find_rects(p, ["phone"], [])[0]
+    assert 10985 <= r["x"] <= 11010, r
+
+
+def test_unreadable_image_raises():
+    from redact import RedactError, find_rects
+    bad = TMP / "bad.png"
+    bad.write_bytes(b"\x89PNG junk")
+    try:
+        find_rects(bad, RULES, [])
+        assert False, "no error"
+    except RedactError:
+        pass
+
+
+def test_available():
+    from redact import available
+    assert available() is None
 
 
 if __name__ == "__main__":
