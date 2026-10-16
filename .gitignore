@@ -4,3 +4,5 @@ __pycache__/
 docs/specs/refs/scribe-home-dark.png
 docs/specs/refs/scribe-home-light-card-hover.png
 docs/specs/refs/viewer-zoomed-preview.png
+build/
+dist/

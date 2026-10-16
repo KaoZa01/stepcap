@@ -266,6 +266,14 @@ def test_safe_title_windows_names():
     assert safe_title("a\x07b. . ") == "a_b" and safe_title("...") == "guide"
 
 
+def test_selfcheck_from_source():
+    # what --selfcheck tries is what a frozen build can lose: each part does real work
+    app = _app()
+    got = app.selfcheck()
+    assert set(got) == {"ui", "samples", "uia", "ocr", "docx", "tray", "tk", "webview"}, got
+    assert all(v == "ok" for v in got.values()), got
+
+
 def test_tray_menu_follows_language():
     # Settings switches the language while the tray icon lives on: every label
     # in its menu, the screen list too, is worked out when the menu opens

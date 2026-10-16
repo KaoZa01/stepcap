@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import time
 import threading
 import urllib.request
@@ -37,6 +38,7 @@ from recorder import Recorder, default_storage
 
 recorder.set_dpi_aware()
 
+VERSION = "1.0.0"  # build.py reads this line for the installer
 HERE = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(16)
 STORAGE = default_storage()
@@ -389,6 +391,7 @@ REDACT_BUSY: dict[str, list[int]] = {}  # gid -> [done, total]
 REDACT_NOTES: dict[str, str] = {}       # gid -> what its page says next time it opens
 _HWND = None
 _MUTEX = None
+_RUNNING = None
 
 
 def main_hwnd():
@@ -780,7 +783,9 @@ def download_image(gid: str, n: str, kind: str, data: bytes) -> dict:
 # Main window (pywebview), single instance, icon
 # ---------------------------------------------------------------------------
 def single_instance() -> bool:
-    global _MUTEX
+    global _MUTEX, _RUNNING
+    # fixed name: the installer (AppMutex) asks to close StepCap while it's open
+    _RUNNING = kernel32.CreateMutexW(None, False, "StepCapRunning")
     key = hashlib.sha1(str(STORAGE).lower().encode()).hexdigest()[:12]
     ctypes.set_last_error(0)
     _MUTEX = kernel32.CreateMutexW(None, False, f"Local\\StepCap-{key}")
@@ -955,8 +960,10 @@ def main():
     for f in (STORAGE / "_tmp").glob("print-*"):  # left by a crash mid-PDF
         f.unlink(missing_ok=True)
     ensure_app_icon(ICON_FILE)
-    try:  # before the sample: a fresh storage picks its language from Windows
-        i18n.set_lang(library.ensure_lang(STORAGE, windows_wants_thai()))
+    try:  # before the sample: the installer's choice, else Windows for a fresh storage
+        picked = library.read_installer_lang(Path(sys.executable).parent) \
+            if getattr(sys, "frozen", False) else None
+        i18n.set_lang(library.ensure_lang(STORAGE, windows_wants_thai(), picked))
     except Exception:
         pass
     try:  # first launch: the sample guide; never a reason not to start
@@ -995,5 +1002,60 @@ def main():
         RUN_FILE.unlink(missing_ok=True)
 
 
+def selfcheck() -> dict[str, str]:
+    """Each part a frozen build (StepCap.exe) can lose, doing real work:
+    name -> "ok" or what went wrong. No window, nothing recorded."""
+    def ui():
+        assert (HERE / "ui" / "index.html").is_file() and i18n.EN
+
+    def samples():
+        for d in SAMPLE_DIRS.values():
+            g = library.read_guide(d)
+            assert g and len(g["steps"]) == 10, d
+
+    def ocr():
+        why = redact.available()
+        if why == tr("ไม่มี OCR ภาษาอังกฤษในเครื่อง"):
+            return  # this computer has no English OCR: a fact about it, not the build
+        assert why is None, why
+        import tempfile
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "white.png"
+            Image.new("RGB", (64, 32), "white").save(f)
+            assert isinstance(redact.ocr_lines(f), list)
+
+    def docx():
+        g = {"title": "x", "steps": [{"id": "a", "kind": "click", "text": "x"}]}
+        assert exporters.build_docx(g, {})[:2] == b"PK"
+
+    def tray():
+        import pystray
+        assert pystray.Icon.__module__.endswith("_win32"), pystray.Icon.__module__
+
+    def tk():
+        import tkinter
+        tkinter.Tcl().eval("info patchlevel")
+
+    def webview_ui():
+        from webview.platforms.winforms import BrowserView  # noqa: F401
+
+    checks = {"ui": ui, "samples": samples, "uia": lambda: recorder._UIA().at_point(0, 0),
+              "ocr": ocr, "docx": docx, "tray": tray, "tk": tk, "webview": webview_ui}
+    out = {}
+    for name, fn in checks.items():
+        try:
+            fn()
+            out[name] = "ok"
+        except Exception as e:
+            out[name] = f"{type(e).__name__}: {e}"[:300]
+    return out
+
+
 if __name__ == "__main__":
+    if "--selfcheck" in sys.argv:  # StepCap.exe --selfcheck out.json (build.py, test_build.py)
+        result = selfcheck()
+        Path(sys.argv[sys.argv.index("--selfcheck") + 1]).write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        raise SystemExit(0 if all(v == "ok" for v in result.values()) else 1)
     main()

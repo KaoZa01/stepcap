@@ -21,6 +21,12 @@
 
 ## ติดตั้ง
 
+**สำหรับผู้ใช้ทั่วไป:** ใช้ไฟล์ `StepCap-Setup-<version>.exe` ไฟล์เดียว ไม่ต้องลง Python และไม่ต้องใช้สิทธิ์ admin
+วิธีติดตั้ง และวิธีกดผ่านหน้าจอ "Windows protected your PC" อยู่ใน [docs/install-guide.md](docs/install-guide.md)
+(ข้อความสองภาษา คัดลอกไปส่งพร้อมไฟล์ได้เลย)
+
+**สำหรับนักพัฒนา (รันจากซอร์ส):**
+
 ```powershell
 git clone https://github.com/KaoZa01/stepcap.git
 cd stepcap
@@ -71,6 +77,26 @@ python -m venv .venv
 ไฟล์ `test_*.py` แต่ละไฟล์รันแยกกันได้ ยกเว้น `test_windows.py` ที่ส่งเมาส์และคีย์บอร์ดจริงเข้าเครื่อง ไฟล์นี้ให้รันเฉพาะเวลาที่ไม่ได้ใช้เครื่องทำอย่างอื่น
 
 ดูแนวทางดีไซน์ได้ที่ [DESIGN.md](DESIGN.md)
+
+## ทำไฟล์ติดตั้ง
+
+ติดตั้งเครื่องมือครั้งเดียว:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+winget install --id JRSoftware.InnoSetup --scope user
+```
+
+แล้วรัน:
+
+```powershell
+.venv\Scripts\python.exe build.py       # ได้ dist\StepCap\ และ dist\StepCap-Setup-<version>.exe
+.venv\Scripts\python.exe test_build.py  # ตรวจโปรแกรมที่รวมแล้ว
+```
+
+- เลขเวอร์ชันอยู่ที่ `VERSION` ใน `app.py`
+- `build.py` สั่งให้โปรแกรมที่รวมแล้วตรวจตัวเอง (`StepCap.exe --selfcheck`) ก่อนทำตัวติดตั้ง
+- `test_installer.py` ติดตั้งจริงลงโฟลเดอร์ชั่วคราว ติดตั้งทับ แล้วถอนการติดตั้ง ระหว่างนั้นจะมีไอคอนใน Start menu ชั่วคราว จึงให้รันเองครั้งเดียวก่อนส่งไฟล์ ไม่ได้อยู่ในชุดทดสอบปกติ
 
 ## สัญญาอนุญาต
 
