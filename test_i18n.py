@@ -10,7 +10,7 @@ import i18n
 
 HERE = Path(__file__).resolve().parent
 # files whose Thai must all go through tr(); each task adds its own
-FILES: list[str] = ["recorder.py", "library.py", "exporters.py", "redact.py"]
+FILES: list[str] = ["recorder.py", "library.py", "exporters.py", "redact.py", "app.py", "overlay.py"]
 
 THAI = re.compile("[\u0e00-\u0e7f]")
 LIT = r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')'

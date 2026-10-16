@@ -28,6 +28,7 @@ import webview
 
 import exporters
 import i18n
+from i18n import tr
 import library
 import overlay
 import recorder
@@ -132,7 +133,7 @@ class Handler(BaseHTTPRequestHandler):
         if not (data.get("force") or cfg["redact_on"]):
             return self._json({"rects": []})
         if f.suffix.lower() == ".gif":
-            return self._json({"error": "ภาพ GIF ซ่อนข้อมูลไม่ได้"})
+            return self._json({"error": tr("ภาพ GIF ซ่อนข้อมูลไม่ได้")})
         try:
             found = redact.find_rects(f, cfg["redact_rules"], cfg["redact_custom"])
         except redact.RedactError as e:
@@ -414,7 +415,7 @@ def show_main():
 def start_rec_ui():
     if not REC.start_recording():
         return
-    OV.toast(REC.monitor_rect(), "เริ่มบันทึกแล้ว")
+    OV.toast(REC.monitor_rect(), tr("เริ่มบันทึกแล้ว"))
     h = main_hwnd()
     recorder.set_capture_excluded(h, True)
     # Collapse into the panel unless the window sits on another monitor,
@@ -463,17 +464,17 @@ def _redact_pass(guide: dict):
     try:
         err = redact.available()
         if err:
-            note = f"ไม่ได้ซ่อนข้อมูลอัตโนมัติ: {err} ตรวจภาพเองก่อนส่ง"
+            note = tr("ไม่ได้ซ่อนข้อมูลอัตโนมัติ: {err} ตรวจภาพเองก่อนส่ง", err=err)
         else:
             cfg = library.load_settings(STORAGE)
             failed = redact.redact_guide(
                 STORAGE, guide, cfg["redact_rules"], cfg["redact_custom"],
                 lambda done, total: REDACT_BUSY.__setitem__(gid, [done, total]))
             if failed:
-                note = (f"ซ่อนข้อมูลไม่สำเร็จ {len(failed)} ภาพ (ขั้นที่ "
-                        f"{', '.join(map(str, failed))}) ตรวจเองก่อนส่ง")
+                note = tr("ซ่อนข้อมูลไม่สำเร็จ {n} ภาพ (ขั้นที่ {steps}) ตรวจเองก่อนส่ง",
+                       n=len(failed), steps=", ".join(map(str, failed)))
     except Exception:
-        note = "ซ่อนข้อมูลอัตโนมัติไม่สำเร็จ ตรวจภาพเองก่อนส่ง"
+        note = tr("ซ่อนข้อมูลอัตโนมัติไม่สำเร็จ ตรวจภาพเองก่อนส่ง")
     finally:
         if note:
             REDACT_NOTES[gid] = note
@@ -562,7 +563,8 @@ def _file_title(gid: str) -> str | None:
     return exporters.safe_title(g.get("title") or "")
 
 
-SAVE_FAILED = {"saved": None, "error": "บันทึกไฟล์ไม่ได้ ไฟล์เดิมอาจเปิดค้างอยู่ ปิดไฟล์นั้นหรือเลือกที่บันทึกอื่น"}
+def save_failed() -> dict:
+    return {"saved": None, "error": tr("บันทึกไฟล์ไม่ได้ ไฟล์เดิมอาจเปิดค้างอยู่ ปิดไฟล์นั้นหรือเลือกที่บันทึกอื่น")}
 
 
 def save_as(filename: str, data: bytes, file_type: str) -> str | None:
@@ -589,7 +591,7 @@ EXPORT_TYPES = {"html": ("html", "HTML (*.html)"), "pdf": ("pdf", "PDF (*.pdf)")
 def export_guide(gid: str, fmt: str, body: bytes) -> dict:
     title = _file_title(gid)
     if title is None:
-        return {"saved": None, "error": "ไม่พบคู่มือนี้"}
+        return {"saved": None, "error": tr("ไม่พบคู่มือนี้")}
     return _export(title, fmt, body, lambda: library.read_guide(STORAGE / gid), gid)
 
 
@@ -598,9 +600,9 @@ def export_page(pid: str, fmt: str, body: bytes) -> dict:
     page = library.read_page(STORAGE, pid)
     doc = page_doc(pid) if page else 404
     if doc == 409:
-        return {"saved": None, "error": "คู่มือใน Page นี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง"}
+        return {"saved": None, "error": tr("คู่มือใน Page นี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง")}
     if not isinstance(doc, dict):
-        return {"saved": None, "error": "ไม่พบ Page นี้"}
+        return {"saved": None, "error": tr("ไม่พบ Page นี้")}
     out = _export(exporters.safe_title(page["title"]), fmt, body, lambda: doc, "")
     if doc["missing"] and out.get("saved"):
         out["skipped"] = doc["missing"]
@@ -644,11 +646,11 @@ def _export(title: str, fmt: str, body: bytes, load, gid: str) -> dict:
             images, missing = _export_images(gid, guide, body)
             data = (exporters.build_markdown if fmt == "md" else exporters.build_docx)(guide, images)
     except Exception:
-        return {"saved": None, "error": ("สร้าง PDF ไม่สำเร็จ" if fmt == "pdf" else "สร้างไฟล์ไม่สำเร็จ") + " ลองใหม่อีกครั้ง"}
+        return {"saved": None, "error": (tr("สร้าง PDF ไม่สำเร็จ ลองใหม่อีกครั้ง") if fmt == "pdf" else tr("สร้างไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง"))}
     try:
         out = {"saved": save_as(f"{title}.{ext}", data, filt)}
     except OSError:
-        return dict(SAVE_FAILED)
+        return save_failed()
     if fmt in ("md", "docx") and missing:
         out["missing"] = missing  # exported without these pictures; the page says so
     return out
@@ -666,12 +668,12 @@ def _export_images(gid: str, guide: dict, body: bytes) -> tuple[dict, list[int]]
         assert isinstance(index, list)
     except Exception:
         index = []
-    nums, sec = {}, None  # step id -> its number; on a page "<guide> ขั้นที่ n"
+    nums, sec = {}, None  # step id -> its number; on a page "<guide> step n"
     for n, s in exporters.numbered(guide):
         if s.get("kind") == "section":
             sec = s.get("text") or ""
         elif n:
-            nums[s["id"]] = f"{sec} ขั้นที่ {n}" if sec is not None else n
+            nums[s["id"]] = tr("{g} ขั้นที่ {n}", g=sec, n=n) if sec is not None else n
     steps = {s["id"]: s for s in guide["steps"]}
     out, missing, pos = {}, [], 0
     for it in index:
@@ -765,12 +767,12 @@ def download_image(gid: str, n: str, kind: str, data: bytes) -> dict:
     """One step's finished image (PNG, or the original GIF)."""
     title = _file_title(gid)
     if title is None:
-        return {"saved": None, "error": "ไม่พบคู่มือนี้"}
-    name = f"{title} - ขั้นตอน {n}.{kind}" if n else f"{title}.{kind}"
+        return {"saved": None, "error": tr("ไม่พบคู่มือนี้")}
+    name = f"{title} - {tr('ขั้นตอน {n}', n=n)}.{kind}" if n else f"{title}.{kind}"
     try:
         return {"saved": save_as(name, data, f"{kind.upper()} (*.{kind})")}
     except OSError:
-        return dict(SAVE_FAILED)
+        return save_failed()
 
 
 # ---------------------------------------------------------------------------
@@ -878,18 +880,21 @@ class Tray:
         self.pystray = pystray
         self.rec = rec
         self.icon = pystray.Icon("stepcap", make_icon_image(_COLORS["idle"]),
-                                 "StepCap - ว่าง", menu=self._menu())
+                                 self._title(), menu=self._menu())
 
     def _state(self) -> str:
         if not self.rec.recording:
             return "idle"
         return "pause" if self.rec.paused else "rec"
 
+    def _title(self) -> str:
+        st = self._state()
+        return tr("StepCap - ว่าง") if st == "idle" else \
+            tr("StepCap - กำลังบันทึก") if st == "rec" else tr("StepCap - พัก")
+
     def _refresh(self):
         self.icon.icon = make_icon_image(_COLORS[self._state()])
-        titles = {"idle": "StepCap - ว่าง", "rec": "StepCap - กำลังบันทึก",
-                  "pause": "StepCap - พัก"}
-        self.icon.title = titles[self._state()]
+        self.icon.title = self._title()
         self.icon.update_menu()
 
     def _menu(self):
@@ -897,21 +902,21 @@ class Tray:
         mon_items = []
         for m in self.rec.monitors:
             w, h = m["right"] - m["left"], m["bottom"] - m["top"]
-            label = f"จอ {m['index'] + 1} ({w}×{h})" + \
-                    (" หลัก" if m["primary"] else "")
+            label = tr("จอ {n} ({w}×{h})", n=m["index"] + 1, w=w, h=h) + \
+                (tr(" หลัก") if m["primary"] else "")
             mon_items.append(p.MenuItem(
                 label, partial(self._pick_monitor, m["index"]),
                 checked=partial(self._is_monitor, m["index"]), radio=True))
         return p.Menu(
-            p.MenuItem("เปิด StepCap", lambda i: show_main(), default=True),
-            p.MenuItem("เลือกจอ", p.Menu(*mon_items)),
-            p.MenuItem(lambda i: "หยุดบันทึก" if self.rec.recording
-                       else "เริ่มบันทึก", self._toggle),
-            p.MenuItem(lambda i: "ทำต่อ" if self.rec.paused else "พักชั่วคราว",
+            p.MenuItem(lambda i: tr("เปิด StepCap"), lambda i: show_main(), default=True),
+            p.MenuItem(lambda i: tr("เลือกจอ"), p.Menu(*mon_items)),
+            p.MenuItem(lambda i: tr("หยุดบันทึก") if self.rec.recording
+                       else tr("เริ่มบันทึก"), self._toggle),
+            p.MenuItem(lambda i: tr("ทำต่อ") if self.rec.paused else tr("พักชั่วคราว"),
                        self._pause,
                        visible=lambda i: self.rec.recording),
             p.Menu.SEPARATOR,
-            p.MenuItem("ออก", lambda i: quit_app()),
+            p.MenuItem(lambda i: tr("ออก"), lambda i: quit_app()),
         )
 
     def _is_monitor(self, idx, item=None):

@@ -277,9 +277,9 @@ def test_export_write_error_reported():
     bad = str(st / "no" / "such" / "x.html")
     app.WINDOW = type("W", (), {"create_file_dialog": lambda self, *a, **k: (bad,)})()
     for fmt, body in (("html", b"<html></html>"), ("md", b'{"images": []}\n')):
-        assert app.export_guide("g1", fmt, body) == app.SAVE_FAILED
-    assert app.download_image("g1", "1", "png", PNG) == app.SAVE_FAILED
-    assert app.SAVE_FAILED["error"].startswith("บันทึกไฟล์ไม่ได้")
+        assert app.export_guide("g1", fmt, body) == app.save_failed()
+    assert app.download_image("g1", "1", "png", PNG) == app.save_failed()
+    assert app.save_failed()["error"].startswith("บันทึกไฟล์ไม่ได้")
 
 
 if __name__ == "__main__":

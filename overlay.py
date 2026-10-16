@@ -11,6 +11,8 @@ import queue
 import threading
 import tkinter as tk
 
+from i18n import tr
+
 _KEY = "#010203"  # transparent-color key (unlikely to clash with content)
 _FONT = "Leelawadee UI"  # Windows UI font with Thai glyphs
 WDA_EXCLUDEFROMCAPTURE = 0x11
@@ -65,7 +67,7 @@ class Overlay:
     def flash(self, rect, color="#fb923c"):
         self._q.put(lambda: self._flash(rect, color))
 
-    def toast(self, rect, text="เริ่มบันทึกแล้ว"):
+    def toast(self, rect, text: str):
         self._q.put(lambda: self._toast(rect, text))
 
     def show_panel(self, work_rect, get_state, on_pause, on_stop):
@@ -171,7 +173,7 @@ class Overlay:
                               fg=FG, activebackground="#3b4048", padx=10,
                               command=lambda: run(on_pause))
         pause_btn.pack(side="left")
-        tk.Button(btns, text="หยุดบันทึก", font=(_FONT, 10, "bold"), relief="flat",
+        tk.Button(btns, text=tr("หยุดบันทึก"), font=(_FONT, 10, "bold"), relief="flat",
                   bg="#b91c1c", fg="#ffffff", activebackground="#991b1b", padx=10,
                   command=lambda: run(on_stop)).pack(side="right")
 
@@ -199,11 +201,11 @@ class Overlay:
                 self._hide_panel()
                 return
             paused = st.get("paused")
-            status.config(text="⏸ พักอยู่" if paused else "● กำลังบันทึก",
+            status.config(text="⏸ " + tr("พักอยู่") if paused else "● " + tr("กำลังบันทึก"),
                           fg=YEL if paused else RED)
-            pause_btn.config(text="ทำต่อ" if paused else "พัก")
+            pause_btn.config(text=tr("ทำต่อ") if paused else tr("พัก"))
             steps = st.get("steps", [])
-            count.config(text=f"{len(steps)} ขั้นตอน")
+            count.config(text=tr("{n} ขั้นตอน", n=len(steps)))
             tail = steps[-5:]
             first = len(steps) - len(tail) + 1
             for i, lab in enumerate(lines):
@@ -213,7 +215,7 @@ class Overlay:
                 else:
                     lab.grid_remove()
             if not steps and not st.get("pending"):
-                lines[0].config(text="ยังไม่มีขั้นตอน เริ่มคลิกได้เลย", fg=MUTED)
+                lines[0].config(text=tr("ยังไม่มีขั้นตอน เริ่มคลิกได้เลย"), fg=MUTED)
                 lines[0].grid(row=0, column=0, sticky="w")
             if st.get("pending"):
                 pend.config(text="… " + st["pending"])
