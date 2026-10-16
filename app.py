@@ -14,16 +14,19 @@ import json
 import os
 import re
 import secrets
+import time
 import threading
 import urllib.request
 from ctypes import wintypes
 from functools import partial
+from io import BytesIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import webview
 
+import exporters
 import library
 import overlay
 import recorder
@@ -243,7 +246,10 @@ class Handler(BaseHTTPRequestHandler):
             new = library.duplicate_guide(STORAGE, gid)
             return self._json({"id": new}) if new else self._missing()
         if action == "export":
-            return self._json({"saved": export_guide(gid, body)})
+            fmt = qs.get("format", ["html"])[0]
+            if fmt not in EXPORT_TYPES:
+                return self._send(400, "bad format", "text/plain")
+            return self._json(export_guide(gid, fmt, body))
         if action == "redact":
             return self._redact(gid, _obj(body))
         if action == "image":
@@ -255,8 +261,7 @@ class Handler(BaseHTTPRequestHandler):
             if kind not in ("png", "gif"):
                 return self._send(400, "bad image", "text/plain")
             n = qs.get("n", [""])[0]
-            return self._json({"saved": download_image(
-                gid, n if n.isdigit() else "", kind, body)})
+            return self._json(download_image(gid, n if n.isdigit() else "", kind, body))
         data = _obj(body)
         if data is None:
             return self._send(400, "bad json", "text/plain")
@@ -477,11 +482,15 @@ def _file_title(gid: str) -> str | None:
     g = library.read_guide(STORAGE / gid)
     if g is None:
         return None
-    return re.sub(r'[\\/:*?"<>|]', "_", g.get("title") or "").strip() or "guide"
+    return exporters.safe_title(g.get("title") or "")
+
+
+SAVE_FAILED = {"saved": None, "error": "บันทึกไฟล์ไม่ได้"}
 
 
 def save_as(filename: str, data: bytes, file_type: str) -> str | None:
-    """Native Save As for bytes the page made; None when cancelled."""
+    """Native Save As for bytes the page made; None when cancelled, OSError
+    when the chosen place can't be written."""
     if WINDOW is None:
         return None
     # file_type stays ASCII: pywebview's filter parser rejects Thai marks
@@ -495,18 +504,150 @@ def save_as(filename: str, data: bytes, file_type: str) -> str | None:
     return str(path)
 
 
-def export_guide(gid: str, html: bytes) -> str | None:
+# format -> (extension, Save As filter; ASCII only)
+EXPORT_TYPES = {"html": ("html", "HTML (*.html)"), "pdf": ("pdf", "PDF (*.pdf)"),
+                "md": ("zip", "ZIP (*.zip)"), "docx": ("docx", "Word (*.docx)")}
+
+
+def export_guide(gid: str, fmt: str, body: bytes) -> dict:
+    """{"saved": path | None} (None = cancelled), plus "error" when it failed.
+    html/pdf: body is the export HTML. md/docx: body is the page's finished
+    pictures, {"images": {step id: {"ext", "data": base64}}}; text comes from
+    the guide on disk."""
     title = _file_title(gid)
-    return save_as(title + ".html", html, "HTML (*.html)") if title else None
+    if title is None:
+        return {"saved": None, "error": "ไม่พบคู่มือนี้"}
+    ext, filt = EXPORT_TYPES[fmt]
+    try:
+        if fmt == "html":
+            data = body
+        elif fmt == "pdf":
+            data = print_pdf(body.decode("utf-8"))
+        else:
+            guide = library.read_guide(STORAGE / gid)
+            images, missing = _export_images(gid, guide, body)
+            data = (exporters.build_markdown if fmt == "md" else exporters.build_docx)(guide, images)
+    except Exception:
+        return {"saved": None, "error": "สร้าง PDF ไม่สำเร็จ" if fmt == "pdf" else "สร้างไฟล์ไม่สำเร็จ"}
+    try:
+        out = {"saved": save_as(f"{title}.{ext}", data, filt)}
+    except OSError:
+        return dict(SAVE_FAILED)
+    if fmt in ("md", "docx") and missing:
+        out["missing"] = missing  # exported without these pictures; the page says so
+    return out
 
 
-def download_image(gid: str, n: str, kind: str, data: bytes) -> str | None:
+def _export_images(gid: str, guide: dict, body: bytes) -> tuple[dict, list[int]]:
+    """The page's finished pictures for md/docx -> ({step id: (ext, bytes)},
+    step numbers whose picture is unusable). body = one JSON line
+    {"images": [{"id", "ext": "png", "size"} | {"id", "ext": "gif"}]} then the
+    PNG bytes back to back -- binary, so a big guide never becomes one giant
+    base64 string. A GIF is read from the guide folder, never from the request."""
+    head, _, rest = body.partition(b"\n")
+    try:
+        index = json.loads(head)["images"]
+        assert isinstance(index, list)
+    except Exception:
+        index = []
+    nums = {s["id"]: n for n, s in exporters.numbered(guide) if n}
+    steps = {s["id"]: s for s in guide["steps"]}
+    out, missing, pos = {}, [], 0
+    for it in index:
+        if not isinstance(it, dict) or it.get("id") not in nums:
+            continue
+        sid, data = it["id"], None
+        if it.get("ext") == "gif":
+            image = steps[sid].get("image") or ""
+            f = STORAGE / gid / image
+            if image.lower().endswith(".gif") and library.safe_name(image) \
+                    and f.parent == STORAGE / gid and f.is_file():
+                data = f.read_bytes()
+            ext = "gif"
+        else:
+            size = it.get("size") if isinstance(it.get("size"), int) else -1
+            data = rest[pos:pos + size] if 0 <= size <= len(rest) - pos else None
+            pos += max(size, 0)
+            ext = "png"
+        if data and library.image_kind(data) == ext and _decodes(data):
+            out[sid] = (ext, data)
+        else:
+            missing.append(nums[sid])
+    return out, sorted(missing)
+
+
+def _decodes(data: bytes) -> bool:
+    from PIL import Image
+    try:
+        with Image.open(BytesIO(data)) as im:
+            im.load()
+        return True
+    except Exception:
+        return False
+
+
+def print_pdf(html: str) -> bytes:
+    """The export HTML as an A4 PDF, printed by WebView2 in a hidden window of
+    our own (same text engine as the app, so Thai shapes right; no browser)."""
+    tmp = STORAGE / "_tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_hex(8)
+    src, pdf = tmp / f"print-{key}.html", tmp / f"print-{key}.pdf"
+    src.write_text(html, encoding="utf-8")
+    win = None
+    try:
+        # focus=False: never activates, so the hidden window can't take focus
+        # or flash a taskbar button while pywebview shows-then-hides it
+        win = webview.create_window("StepCap print", url=src.as_uri(), hidden=True, focus=False)
+        if not win.events.loaded.wait(30):
+            raise RuntimeError("print page did not load")
+        end = time.time() + 30
+        while not win.evaluate_js("[...document.images].every(i => i.complete)"):
+            if time.time() > end:
+                raise RuntimeError("print images did not load")
+            time.sleep(0.1)
+        # an empty title would make WebView2 title the PDF with our temp file name
+        win.evaluate_js("document.title.trim() || (document.title = 'StepCap'); 1")
+        from System import Action
+        from System.Threading.Tasks import Task
+        done, res = threading.Event(), {}
+
+        def finished(t):
+            res["ok"] = not t.IsFaulted and t.Result
+            done.set()
+
+        def go():
+            try:
+                core = win.native.browser.webview.CoreWebView2
+                st = core.Environment.CreatePrintSettings()
+                st.PageWidth, st.PageHeight = 8.27, 11.69  # A4, inches
+                st.ShouldPrintBackgrounds = True
+                st.ShouldPrintHeaderAndFooter = False
+                core.PrintToPdfAsync(str(pdf), st).ContinueWith(
+                    Action[Task[bool]](finished))
+            except Exception:
+                done.set()
+        win.native.Invoke(Action(go))
+        if not done.wait(120) or not res.get("ok") or not pdf.is_file():
+            raise RuntimeError("PrintToPdf failed")
+        return pdf.read_bytes()
+    finally:
+        if win is not None:
+            win.destroy()
+        for f in (src, pdf):
+            f.unlink(missing_ok=True)
+
+
+def download_image(gid: str, n: str, kind: str, data: bytes) -> dict:
     """One step's finished image (PNG, or the original GIF)."""
     title = _file_title(gid)
     if title is None:
-        return None
+        return {"saved": None, "error": "ไม่พบคู่มือนี้"}
     name = f"{title} - ขั้นตอน {n}.{kind}" if n else f"{title}.{kind}"
-    return save_as(name, data, f"{kind.upper()} (*.{kind})")
+    try:
+        return {"saved": save_as(name, data, f"{kind.upper()} (*.{kind})")}
+    except OSError:
+        return dict(SAVE_FAILED)
 
 
 # ---------------------------------------------------------------------------
