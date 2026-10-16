@@ -464,23 +464,59 @@ def test_shutdown_not_blocked():
 
 
 def test_sample_route_and_settings():
-    titles = lambda: [g["title"] for g in get("/api/guides")].count(library.SAMPLE_TITLE)
+    titles = lambda: [g["title"] for g in get("/api/guides")].count(library.SAMPLE_TITLES["th"])
     if (HERE / "samples" / "getting-started" / "guide.json").is_file():
         n = titles()
         assert n == 1, n  # copied once at first launch
-        assert get(f"/api/guide/{post('/api/sample')['id']}")["title"] == library.SAMPLE_TITLE
+        assert get(f"/api/guide/{post('/api/sample')['id']}")["title"] == library.SAMPLE_TITLES["th"]
         assert titles() == n + 1
     else:
         assert post("/api/sample") == 500
+    try:
+        post("/api/settings", {"lang": "en"})
+        gid = post("/api/sample")["id"]
+        assert get(f"/api/guide/{gid}")["title"] == library.SAMPLE_TITLES["en"]
+    finally:
+        post("/api/settings", {"lang": "th"})
     post("/api/settings", {"tours_seen": ["home"]})
     assert get("/api/settings")["tours_seen"] == ["home"]
     assert post("/api/settings", {"tours_seen": ["bogus"]}) == 400
     assert post("/api/settings", {"sample_added": False}) == 400
 
 
+def test_english_server_messages():
+    try:
+        post("/api/settings", {"lang": "en"})
+        gname = post(f"/api/guide/{OLD_ID}/image", _img("GIF"))["image"]
+        assert post(f"/api/guide/{OLD_ID}/redact", {"image": gname, "force": True}) == \
+            {"error": "GIF pictures can't have details hidden"}
+        t, out = export_async(OLD_ID, _img("PNG"), route="download?n=2")
+        dlg = wait(lambda: save_dialog(CTX["pid"]), 10)
+        assert dlg, "no Save As dialog appeared"
+        box = next(e for e in child_edits(dlg) if edit_text(e).endswith(".png"))
+        assert edit_text(box).endswith(" - Step 2.png"), edit_text(box)
+        U.PostMessageW(dlg, WM_COMMAND, 2, 0)  # IDCANCEL
+        t.join(10)
+        assert out["r"] == {"saved": None}, out
+    finally:
+        post("/api/settings", {"lang": "th"})
+
+
+def test_lang_route():
+    assert post("/api/settings", {"lang": "fr"}) == 400
+    try:
+        post("/api/settings", {"lang": "en"})
+        assert get("/api/settings")["lang"] == "en"
+        code, html = raw("/")
+        assert code == 200 and '<html lang="en">' in html and 'const LANG="en"' in html, html[:200]
+    finally:
+        post("/api/settings", {"lang": "th"})
+    assert '<html lang="th">' in raw("/")[1]
+
+
 TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
-         test_library_routes, test_sample_route_and_settings, test_redact_settings_route, test_redact_route,
+         test_library_routes, test_sample_route_and_settings, test_redact_settings_route, test_redact_route, test_lang_route, test_english_server_messages,
          test_ui_served, test_export_save_as,
          test_upload_and_content_types, test_download_save_as, test_export_pdf,
          test_export_md_and_docx, test_page_routes, test_page_export_md,

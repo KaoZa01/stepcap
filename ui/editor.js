@@ -17,10 +17,10 @@ const IED_ICON = {
   shield: _svg('<path d="M12 3 5 6v6c0 4 3 7.5 7 9 4-1.5 7-5 7-9V6z"/><path d="M9 12h6"/>'),
   image: _svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>'),
 };
-const IED_TOOLS = [["select", "เลือก"], ["marker", "จุดคลิก"], ["arrow", "ลูกศร"], ["box", "กรอบ"],
-  ["text", "ข้อความ"], ["blur", "เบลอ"], ["black", "ปิดดำ"], ["crop", "ครอป"]];
-const LINE_W = [["บาง", 4], ["กลาง", 8], ["หนา", 14]];
-const TEXT_SIZES = [["เล็ก", 28], ["กลาง", 40], ["ใหญ่", 56]];
+const IED_TOOLS = [["select", tr("เลือก")], ["marker", tr("จุดคลิก")], ["arrow", tr("ลูกศร")], ["box", tr("กรอบ")],
+  ["text", tr("ข้อความ")], ["blur", tr("เบลอ")], ["black", tr("ปิดดำ")], ["crop", tr("ครอป")]];
+const LINE_W = [[tr("บาง"), 4], [tr("กลาง"), 8], [tr("หนา"), 14]];
+const TEXT_SIZES = [[tr("เล็ก"), 28], [tr("กลาง"), 40], [tr("ใหญ่"), 56]];
 const MIN_DRAG = 10;  // natural px; shorter drags draw nothing
 
 // Editor state; also the hook the page-level tests drive.
@@ -56,12 +56,12 @@ function openImageEditor(stepId) {
   el.innerHTML = `<div class="ied-bar">
       ${IED_TOOLS.map(([t, label]) => `<button type="button" class="tb" data-tool="${t}" data-tip="${label}">${IED_ICON[t]}</button>`).join("")}
       <span class="sp"></span>
-      <button type="button" class="tb" data-act="undo" data-tip="ย้อนกลับ (Ctrl+Z)">${IED_ICON.undo}</button>
-      <button type="button" class="tb" data-act="redact" data-tip="ซ่อนข้อมูลอัตโนมัติ">${IED_ICON.shield}</button>
-      <button type="button" class="tb" data-act="replace" data-tip="เปลี่ยนภาพ">${IED_ICON.image}</button>
+      <button type="button" class="tb" data-act="undo" data-tip="${tr("ย้อนกลับ (Ctrl+Z)")}">${IED_ICON.undo}</button>
+      <button type="button" class="tb" data-act="redact" data-tip="${tr("ซ่อนข้อมูลอัตโนมัติ")}">${IED_ICON.shield}</button>
+      <button type="button" class="tb" data-act="replace" data-tip="${tr("เปลี่ยนภาพ")}">${IED_ICON.image}</button>
       <input type="file" accept="image/png,image/jpeg,image/gif" hidden>
-      <button type="button" class="tb" data-act="download" data-tip="ดาวน์โหลดภาพ">${ICON.export}</button>
-      <button type="button" class="btn dark" data-act="done" title="ปิดตัวแก้ภาพ (Esc)">${ICON.done} เสร็จสิ้น</button>
+      <button type="button" class="tb" data-act="download" data-tip="${tr("ดาวน์โหลดภาพ")}">${ICON.export}</button>
+      <button type="button" class="btn dark" data-act="done" title="${tr("ปิดตัวแก้ภาพ (Esc)")}">${ICON.done} ${tr("เสร็จสิ้น")}</button>
     </div><div class="ied-opts"></div><div class="ied-stage"><canvas></canvas></div>`;
   document.body.appendChild(el);
   // a full-window editor: the page behind takes no focus or clicks
@@ -115,7 +115,7 @@ function iedLoad() {
     };
     img.onerror = () => {
       IED.img = null;
-      document.querySelector(".ied-stage").innerHTML = '<div class="imgfail">เปิดภาพนี้ไม่ได้</div>';
+      document.querySelector(".ied-stage").innerHTML = '<div class="imgfail">' + esc(tr("เปิดภาพนี้ไม่ได้")) + "</div>";
       resolve();
     };
     img.src = imgUrl(GID, IED.step.image);
@@ -142,7 +142,7 @@ function iedTools() {
     const off = gif && b.dataset.tool !== "select";
     b.classList.toggle("off", off);
     b.setAttribute("aria-disabled", off ? "true" : "false");
-    b.dataset.tip = off ? "ใช้กับ GIF ไม่ได้" : IED_TOOLS.find(t => t[0] === b.dataset.tool)[1];
+    b.dataset.tip = off ? tr("ใช้กับ GIF ไม่ได้") : IED_TOOLS.find(t => t[0] === b.dataset.tool)[1];
     b.classList.toggle("on", b.dataset.tool === IED.tool);
   });
   IED.canvas?.classList.toggle("crosshair", IED.tool !== "select");
@@ -150,7 +150,7 @@ function iedTools() {
   if (rb) {
     rb.classList.toggle("off", gif);
     rb.setAttribute("aria-disabled", gif ? "true" : "false");
-    rb.dataset.tip = gif ? "ใช้กับ GIF ไม่ได้" : "ซ่อนข้อมูลอัตโนมัติ";
+    rb.dataset.tip = gif ? tr("ใช้กับ GIF ไม่ได้") : tr("ซ่อนข้อมูลอัตโนมัติ");
   }
 }
 
@@ -165,7 +165,7 @@ async function iedAutoRedact() {
   b.classList.remove("busy");
   if (n === null) return;
   if (!IED.open || IED.step !== step) { if (n) renderSteps(); return; }
-  toast(n ? `ซ่อนเพิ่ม ${n} จุด` : "ไม่พบข้อมูลที่ต้องซ่อน");
+  toast(n ? tr("ซ่อนเพิ่ม {n} จุด", {n}) : tr("ไม่พบข้อมูลที่ต้องซ่อน"));
   if (n) iedChanged();
 }
 
@@ -298,7 +298,7 @@ async function iedDown(e) {
     st.markers.push({x: p.x, y: p.y, ...clickStyle(), color: IED.color});
     iedChanged();
   } else if (IED.tool === "text") {
-    const text = await uiPrompt("พิมพ์ข้อความ");
+    const text = await uiPrompt(tr("พิมพ์ข้อความ"));
     if (text === null || !text.trim()) return;
     iedPush();
     st.annotations.push({type: "text", x: p.x, y: p.y, text: text.trim(), color: IED.color, size: IED.size});
@@ -372,7 +372,7 @@ async function iedDblClick(e) {
   if (IED.tool !== "select") return;
   const hit = iedHit(IED.toImage(e.clientX, e.clientY));
   if (!hit || hit.item.type !== "text") return;
-  const text = await uiPrompt("แก้ข้อความ", hit.item.text);
+  const text = await uiPrompt(tr("แก้ข้อความ"), hit.item.text);
   if (text === null || !text.trim() || text.trim() === hit.item.text) return;
   iedPush();
   hit.item.text = text.trim();
@@ -399,7 +399,7 @@ function iedKey(e) {
   else if (e.key === "Escape") {
     if (IED.tool !== "select") iedSetTool("select");
     else if (IED.sel) { IED.sel = null; iedDraw(); iedOpts(); }
-    else closeImageEditor();  // nothing left to let go of: Esc leaves, like "เสร็จสิ้น"
+    else closeImageEditor();  // nothing left to let go of: Esc leaves, like the Done button
   }
 }
 
@@ -444,7 +444,7 @@ async function iedReplace(blob) {
 function iedOpts() {
   const row = document.querySelector(".ied-opts");
   if (!row) return;
-  if (iedGif()) { row.innerHTML = '<span class="muted">ภาพ GIF แก้ได้แค่เปลี่ยนภาพหรือดาวน์โหลด</span>'; return; }
+  if (iedGif()) { row.innerHTML = '<span class="muted">' + esc(tr("ภาพ GIF แก้ได้แค่เปลี่ยนภาพหรือดาวน์โหลด")) + "</span>"; return; }
   const it = IED.sel?.item, t = IED.tool;
   const kind = it ? (it.type || "marker") : t;
   const seg = (label, items, cur, key) => `<span class="muted">${label}</span><div class="seg">${
@@ -452,19 +452,19 @@ function iedOpts() {
   let h = "";
   if (["marker", "arrow", "box", "text"].includes(kind)) {
     const cur = (it ? it.color : IED.color).toUpperCase();
-    h += `<span class="muted">สี</span><div class="sw">${SWATCHES.map(c =>
+    h += `<span class="muted">${tr("สี")}</span><div class="sw">${SWATCHES.map(c =>
       `<button type="button" class="swatch${c === cur ? " on" : ""}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join("")}</div>
-      <input type="color" class="icol" value="${cur.toLowerCase()}" title="เลือกสีเอง">`;
+      <input type="color" class="icol" value="${cur.toLowerCase()}" title="${tr("เลือกสีเอง")}">`;
   }
-  if (kind === "arrow" || kind === "box") h += seg("เส้น", LINE_W, it ? it.width : IED.width, "w");
-  if (kind === "text") h += seg("ขนาดตัวอักษร", TEXT_SIZES, it ? it.size : IED.size, "ts");
+  if (kind === "arrow" || kind === "box") h += seg(tr("เส้น"), LINE_W, it ? it.width : IED.width, "w");
+  if (kind === "text") h += seg(tr("ขนาดตัวอักษร"), TEXT_SIZES, it ? it.size : IED.size, "ts");
   if (it && kind === "marker")
-    h += seg("รูปทรง", [["วงกลม", "circle"], ["สี่เหลี่ยม", "rect"]], it.shape || "circle", "shape") +
-      `<span class="muted">ขนาด</span><input type="range" class="msz" min="24" max="96" value="${it.size}">`;
-  if (t === "crop" && IED.step.crop) h += `<button type="button" class="btn" data-op="uncrop">ล้างครอป</button>`;
-  if (it) h += `<button type="button" class="btn danger" data-op="del">ลบ</button>`;
-  if (!h) h = `<span class="muted">${t === "select" ? "คลิกเลือกสิ่งที่วาดไว้เพื่อย้าย แก้ หรือลบ"
-    : t === "crop" ? "ลากเพื่อเลือกส่วนที่จะเก็บไว้" : "ลากบนภาพเพื่อวาด"}</span>`;
+    h += seg(tr("รูปทรง"), [[tr("วงกลม"), "circle"], [tr("สี่เหลี่ยม"), "rect"]], it.shape || "circle", "shape") +
+      `<span class="muted">${tr("ขนาด")}</span><input type="range" class="msz" min="24" max="96" value="${it.size}">`;
+  if (t === "crop" && IED.step.crop) h += `<button type="button" class="btn" data-op="uncrop">${tr("ล้างครอป")}</button>`;
+  if (it) h += `<button type="button" class="btn danger" data-op="del">${tr("ลบ")}</button>`;
+  if (!h) h = `<span class="muted">${t === "select" ? tr("คลิกเลือกสิ่งที่วาดไว้เพื่อย้าย แก้ หรือลบ")
+    : t === "crop" ? tr("ลากเพื่อเลือกส่วนที่จะเก็บไว้") : tr("ลากบนภาพเพื่อวาด")}</span>`;
   row.innerHTML = h;
   const edit = fn => { if (it) { iedPush(); fn(it); iedChanged(); } else { iedOpts(); } };
   row.querySelectorAll("[data-c]").forEach(b => b.onclick = () => {

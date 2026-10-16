@@ -1,0 +1,161 @@
+{
+  "id": "getting-started",
+  "title": "Sample: Getting started with StepCap",
+  "created": "2026-10-16T09:00:00",
+  "updated": "2026-10-16T09:00:00",
+  "bookmarked": false,
+  "app": "StepCap",
+  "app_icon": "app_icon.png",
+  "settings": {
+    "toc": false,
+    "step_count": false,
+    "created": false,
+    "updated": false,
+    "layout": "linear",
+    "click_color": "#FB923C",
+    "click_shape": "circle",
+    "click_size": 44
+  },
+  "steps": [
+    {
+      "id": "s01",
+      "kind": "note",
+      "text": "This guide was made with StepCap itself. Click Edit to try changing its text or pictures, or export it. Delete it from the card's … menu when you no longer need it.",
+      "image": null,
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s02",
+      "kind": "click",
+      "text": "Click \"+ New recording\" at the top right",
+      "image": "step-01.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 1171,
+          "y": 28,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s03",
+      "kind": "click",
+      "text": "Choose the screen to record, then click \"Start recording\"",
+      "image": "step-02.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 1085,
+          "y": 164,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s04",
+      "kind": "image",
+      "text": "Work in the program you are teaching as usual. The StepCap window gets out of the way, and every click and keystroke shows in the panel at the bottom right. Click \"Pause\" or press Ctrl+Alt+P for anything you don't want recorded.",
+      "image": "step-03.png",
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s05",
+      "kind": "click",
+      "text": "Click \"Stop recording\" on the panel (or press Ctrl+Alt+R). The guide opens for editing straight away.",
+      "image": "step-04.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 267,
+          "y": 147,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s06",
+      "kind": "image",
+      "text": "Change each step's text in its box, delete steps you don't need with the bin icon, and reorder them with the up and down buttons.",
+      "image": "step-05.png",
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s07",
+      "kind": "click",
+      "text": "Click \"Edit picture\" to add arrows, boxes and text, blur details, or crop the picture.",
+      "image": "step-06.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 242,
+          "y": 180,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s08",
+      "kind": "click",
+      "text": "Click \"Export\", choose Word, PDF, HTML or Markdown, then choose where to save the file.",
+      "image": "step-07.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 1185,
+          "y": 28,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s09",
+      "kind": "note",
+      "text": "⚠ Before sending it to anyone: check every picture again. Automatic blurring reads English letters and numbers only. Send only the exported file, never the whole StepCap folder: it holds the original pictures from before blurring.",
+      "image": null,
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s10",
+      "kind": "note",
+      "text": "Good to know: Pages combine several guides into one document · Trash restores deleted guides · Settings has the storage folder, the shortcuts and a button to show the tips again.",
+      "image": null,
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    }
+  ]
+}

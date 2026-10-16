@@ -472,7 +472,7 @@ def _fake_sample(root: Path) -> Path:
     src.mkdir()
     (src / "a.png").write_bytes(_img_bytes("PNG"))
     (src / "guide.json").write_text(json.dumps(
-        {"title": L.SAMPLE_TITLE, "app": "StepCap", "redact_pending": True,
+        {"title": L.SAMPLE_TITLES["th"], "app": "StepCap", "redact_pending": True,
          "steps": [{"id": "s1", "kind": "click", "text": "x", "image": "a.png"}]},
         ensure_ascii=False), encoding="utf-8")
     return src
@@ -485,7 +485,7 @@ def test_ensure_sample_once():
         src, st = _fake_sample(root), root / "store"  # the storage doesn't exist yet
         gid = L.ensure_sample(st, src)
         g = L.read_guide(st / gid)
-        assert g["title"] == L.SAMPLE_TITLE and "redact_pending" not in g and g["created"]
+        assert g["title"] == L.SAMPLE_TITLES["th"] and "redact_pending" not in g and g["created"]
         assert (st / gid / "a.png").is_file()
         assert L.load_settings(st)["sample_added"] is True
         assert L.ensure_sample(st, src) is None and len(list_guides(st)) == 1
@@ -560,11 +560,18 @@ def test_add_sample_never_touches_a_taken_folder():
 
 
 def test_repo_sample_guide():
+    for lang, folder in (("th", "getting-started"), ("en", "getting-started-en")):
+        _check_repo_sample(lang, Path(__file__).parent / "samples" / folder)
+
+
+def _check_repo_sample(lang, src):
+    import re
     from PIL import Image
-    from library import SAMPLE_TITLE, image_kind, read_guide
-    src = Path(__file__).parent / "samples" / "getting-started"
+    from library import SAMPLE_TITLES, image_kind, read_guide
     g = read_guide(src)
-    assert g and g["title"] == SAMPLE_TITLE and "redact_pending" not in g
+    assert g and g["title"] == SAMPLE_TITLES[lang] and "redact_pending" not in g, (lang, g and g["title"])
+    if lang == "en":
+        assert not [s["text"] for s in g["steps"] if re.search("[฀-๿]", s["text"])]
     kinds = [s["kind"] for s in g["steps"]]
     assert kinds.count("note") == 3 and len(kinds) == 10, kinds
     for s in g["steps"]:
@@ -582,6 +589,69 @@ def test_onboarding_settings_cleaned():
         st = Path(d)
         assert L.save_settings(st, tours_seen=["home", "nope"], sample_added="yes")["tours_seen"] == ["home"]
         assert L.load_settings(st)["sample_added"] is False
+
+
+def test_ensure_lang_fresh_storage():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        assert L.ensure_lang(Path(d) / "a", True) == "th"
+        st = Path(d) / "b"
+        assert L.ensure_lang(st, False) == "en"
+        assert L.load_settings(st)["lang"] == "en"
+
+
+def test_ensure_lang_existing_user():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        (st / "g1").mkdir()
+        (st / "g1" / "guide.json").write_text("{}", encoding="utf-8")
+        assert L.ensure_lang(st, False) == "th"
+        assert not (st / "settings.json").exists()
+    for raw, want in (({"view": "list"}, "th"), ({"lang": "en"}, "en")):
+        with tempfile.TemporaryDirectory() as d:
+            st = Path(d)
+            (st / "settings.json").write_text(json.dumps(raw), encoding="utf-8")
+            assert L.ensure_lang(st, False) == want
+
+
+def test_ensure_lang_corrupt_settings():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        (st / "settings.json").write_bytes(b'{"vi')
+        assert L.ensure_lang(st, False) == "th"
+        assert (st / "settings.json").read_bytes() == b'{"vi'
+
+
+def test_english_texts():
+    import i18n
+    import library as L
+    now = datetime(2026, 10, 16, 12, 0, 0)
+    ago = lambda s: L.rel_time(datetime.fromtimestamp(now.timestamp() - s).isoformat(), now)
+    with i18n.using("en"):
+        assert [ago(30), ago(60), ago(7200), ago(86400), ago(3 * 86400)] == \
+            ["just now", "1 min ago", "2 hr ago", "1 day ago", "3 days ago"]
+        with tempfile.TemporaryDirectory() as d:
+            st = Path(d)
+            (st / "g1").mkdir()
+            (st / "g1" / "guide.json").write_text(json.dumps({"id": "g1", "title": "Guide", "steps": []}),
+                                                  encoding="utf-8")
+            new = L.duplicate_guide(st, "g1")
+            assert L.read_guide(st / new)["title"] == "Guide (copy)"
+        page = {"id": "p", "title": "P", "settings": {"step_count": True},
+                "sections": [{"type": "guide", "guide": "g1"}, {"type": "guide", "guide": "gone"}]}
+        doc, _ = L.compile_page(page, {"g1": {"title": "Guide", "steps": []}, "gone": None})
+        assert doc["meta_count"] == "1 guide"
+        assert doc["steps"][1]["text"] == "This guide was deleted"
+
+
+def test_lang_setting_cleaned():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        assert L.save_settings(st, lang="fr")["lang"] == "th"
+        assert L.save_settings(st, lang="en")["lang"] == "en"
 
 
 if __name__ == "__main__":

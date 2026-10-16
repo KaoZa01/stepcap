@@ -91,21 +91,21 @@ async function renderGuide(guide, root) {
   const S = guide.settings || {};
   const fmt = iso => {
     const d = new Date(iso);
-    return iso && !isNaN(d) ? d.toLocaleDateString("th-TH", {year: "numeric", month: "short", day: "numeric"}) : "";
+    return iso && !isNaN(d) ? d.toLocaleDateString(LANG === "en" ? "en-GB" : "th-TH", {year: "numeric", month: "short", day: "numeric"}) : "";
   };
   const numbered = guide.steps.filter(s => s.kind !== "note" && s.kind !== "section");
   // a page: "section" entries open each guide or text block; numbering restarts
   const secs = guide.steps.filter(s => s.kind === "section" && !s.missing);
   const meta = guide.meta_count ? [guide.meta_count] : [];
-  if (S.step_count) meta.push(numbered.length + " ขั้นตอน");
-  if (S.created && fmt(guide.created)) meta.push("สร้างเมื่อ " + fmt(guide.created));
-  if (S.updated && fmt(guide.updated)) meta.push("แก้ไขล่าสุด " + fmt(guide.updated));
+  if (S.step_count) meta.push(tr("{n} ขั้นตอน", {n: numbered.length}));
+  if (S.created && fmt(guide.created)) meta.push(tr("สร้างเมื่อ {d}", {d: fmt(guide.created)}));
+  if (S.updated && fmt(guide.updated)) meta.push(tr("แก้ไขล่าสุด {d}", {d: fmt(guide.updated)}));
   let html = '<div class="rg-wrap"><h1>' + E(guide.title) + "</h1>";
   if (meta.length) html += '<div class="rg-meta">' + meta.map(E).join(" · ") + "</div>";
   if (guide.description) html += '<p class="rg-desc">' + E(guide.description) + "</p>";  // a page's
   const toc = secs.length ? secs.filter(s => s.text) : numbered;  // an untitled text block: no entry
   if (S.toc && toc.length)
-    html += '<nav class="rg-toc"><b>สารบัญ</b><ol>' + toc.map(s =>
+    html += '<nav class="rg-toc"><b>' + E(tr("สารบัญ")) + "</b><ol>" + toc.map(s =>
       '<li><a href="#step-' + E(s.id) + '">' + E(s.text) + "</a></li>").join("") + "</ol></nav>";
   root.innerHTML = html + "</div>";
   const wrap = root.querySelector(".rg-wrap");
@@ -138,7 +138,7 @@ async function renderGuide(guide, root) {
     }
     wrap.appendChild(div);
   }
-  if (!guide.steps.length) wrap.insertAdjacentHTML("beforeend", '<p class="rg-empty">ยังไม่มีขั้นตอน</p>');
+  if (!guide.steps.length) wrap.insertAdjacentHTML("beforeend", '<p class="rg-empty">' + esc(tr("ยังไม่มีขั้นตอน")) + "</p>");
 }
 
 async function guidePage(id, mode) {
@@ -165,12 +165,12 @@ async function guidePage(id, mode) {
 
 function viewPage() {
   app.innerHTML = `<header class="gtop">
-      <button class="icon-btn" id="back" title="กลับหน้าแรก" aria-label="กลับหน้าแรก">${ICON.back}</button>
+      <button class="icon-btn" id="back" title="${tr("กลับหน้าแรก")}" aria-label="${tr("กลับหน้าแรก")}">${ICON.back}</button>
       <div class="gtitle">${esc(STATE.title)}</div>
-      <button class="btn" id="edit">${ICON.edit} แก้ไข</button>
-      <button class="btn dark" id="exp">${ICON.export} ส่งออก</button>
+      <button class="btn" id="edit">${ICON.edit} ${tr("แก้ไข")}</button>
+      <button class="btn dark" id="exp">${ICON.export} ${tr("ส่งออก")}</button>
     </header><div class="gbody"><div id="rg"></div>
-      ${STATE.steps.length ? "" : `<p class="muted">กด <b>แก้ไข</b> เพื่อเพิ่มภาพหรือหมายเหตุ หรือบันทึกใหม่จากหน้าแรก</p>`}</div>`;
+      ${STATE.steps.length ? "" : `<p class="muted">${tr("กด <b>แก้ไข</b> เพื่อเพิ่มภาพหรือหมายเหตุ หรือบันทึกใหม่จากหน้าแรก")}</p>`}</div>`;
   document.getElementById("back").onclick = () => nav({page: "home"});
   document.getElementById("edit").onclick = () => goGuide(GID, "edit");
   document.getElementById("exp").onclick = e => { e.stopPropagation(); exportMenu(e.currentTarget, GID); };
@@ -236,7 +236,7 @@ async function buildExportHtml(gid, {print = false, failed = [], doc = null} = {
   const holder = document.createElement("div");
   await renderGuide({...g, steps}, holder);  // every picture is an <img> here: no canvas, no script
   const css = document.getElementById("rg-css").textContent;
-  return `<!doctype html><html lang="th"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="${LANG}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="StepCap">
 <title>${esc(g.title)}</title>
 <style>body{margin:0;padding:32px 24px;background:#fff}@media (max-width:480px){body{padding:16px 12px}}
@@ -251,7 +251,7 @@ const PRINT_CSS = "@page{size:A4;margin:14mm 14mm 16mm;" +
   "body{padding:0}.rg-step{break-inside:avoid}.rg-secwrap{break-after:avoid}" +
   ".rg-step img{max-width:100%;max-height:230mm;width:auto;height:auto}";
 
-// What a toast calls each step: its number, or "<guide> ขั้นที่ n" on a page
+// What a toast calls each step: its number, or "<guide> step n" on a page
 // (numbers restart after each section there).
 function stepLabels(g) {
   const out = {};
@@ -260,7 +260,7 @@ function stepLabels(g) {
     if (s.kind === "section") { n = 0; sec = s.text || ""; continue; }
     if (s.kind === "note") continue;
     n++;
-    out[s.id] = sec === null ? n : `${sec} ขั้นที่ ${n}`;
+    out[s.id] = sec === null ? n : tr("{g} ขั้นที่ {n}", {g: sec, n});
   }
   return out;
 }
@@ -300,10 +300,10 @@ let EXPORTING = false;
 async function exportDoc(kind, id, format = "html") {
   if (EXPORTING) return;
   EXPORTING = true;
-  toast("กำลังส่งออก…", 3600000);  // stays until the result replaces it
+  toast(tr("กำลังส่งออก…"), 3600000);  // stays until the result replaces it
   const base = `/api/${kind}/${encodeURIComponent(id)}`, failed = [];
-  const busy = {error: kind === "page" ? "คู่มือใน Page นี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง"
-    : "คู่มือนี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง"};
+  const busy = {error: kind === "page" ? tr("คู่มือใน Page นี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง")
+    : tr("คู่มือนี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง")};
   let r, doc;
   try {
     const src = await api(kind === "page" ? base + "/doc" : base);
@@ -319,32 +319,32 @@ async function exportDoc(kind, id, format = "html") {
       type = "application/octet-stream";
     }
     const res = await api(base + "/export?format=" + format, {method: "POST", headers: {"Content-Type": type}, body});
-    r = res.ok ? await res.json() : res.status === 409 ? busy : {error: "โปรแกรมตอบกลับผิดพลาด ลองใหม่อีกครั้ง"};
+    r = res.ok ? await res.json() : res.status === 409 ? busy : {error: tr("โปรแกรมตอบกลับผิดพลาด ลองใหม่อีกครั้ง")};
   } catch (e) {
-    r = e === busy ? busy : {error: "เตรียมภาพหรือเนื้อหาไม่ได้ ลองใหม่อีกครั้ง"};
+    r = e === busy ? busy : {error: tr("เตรียมภาพหรือเนื้อหาไม่ได้ ลองใหม่อีกครั้ง")};
   } finally {
     EXPORTING = false;
   }
   document.querySelectorAll(".toast").forEach(t => t.remove());
-  if (r.error) return toastErr("ส่งออกไม่สำเร็จ: " + r.error, 8000);
+  if (r.error) return toastErr(tr("ส่งออกไม่สำเร็จ: {err}", {err: r.error}), 8000);
   if (!r.saved) return;  // cancelled
   const name = String(r.saved).split(/[\\/]/).pop();
   failed.push(...(r.missing || []));  // pictures the server couldn't use (e.g. a GIF gone)
   const notes = [];
-  if (failed.length) notes.push(`ภาพของขั้นที่ ${byDocOrder(failed, doc).join(", ")} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ`);
-  if (r.skipped) notes.push(`ข้ามคู่มือที่ถูกลบ ${r.skipped} อัน`);
+  if (failed.length) notes.push(tr("ภาพของขั้นที่ {steps} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ", {steps: byDocOrder(failed, doc).join(", ")}));
+  if (r.skipped) notes.push(tr("ข้ามคู่มือที่ถูกลบ {n} อัน", {n: r.skipped}));
   for (const n of doc?.redact_notes || []) notes.push(n);  // a guide its pass couldn't cover
-  if (notes.length) toastErr(`บันทึก ${name} แล้ว แต่` + notes.join(" และ"), 10000);
-  else toast(`บันทึก ${name} แล้ว`, 4000);
+  if (notes.length) toastErr(tr("บันทึก {name} แล้ว แต่", {name}) + notes.join(tr(" และ")), 10000);
+  else toast(tr("บันทึก {name} แล้ว", {name}), 4000);
 }
 
 // ---------------------------------------------------------------- edit mode
-const KIND_TH = {click: "คลิก", rightclick: "คลิกขวา", doubleclick: "ดับเบิลคลิก", type: "พิมพ์",
-  password: "รหัสผ่าน", shortcut: "ปุ่มลัด", note: "หมายเหตุ", image: "ภาพ"};
+const KIND_TH = {click: tr("คลิก"), rightclick: tr("คลิกขวา"), doubleclick: tr("ดับเบิลคลิก"), type: tr("พิมพ์"),
+  password: tr("รหัสผ่าน"), shortcut: tr("ปุ่มลัด"), note: tr("หมายเหตุ"), image: tr("ภาพ")};
 const SWATCHES = ["#FB923C", "#EF4444", "#EAB308", "#22C55E", "#3B82F6", "#A855F7"];
-const DOC_SWITCHES = [["toc", "สารบัญ"], ["step_count", "จำนวนขั้นตอน"],
-  ["created", "วันที่สร้าง"], ["updated", "วันที่แก้ไขล่าสุด"]];
-const UPLOAD_FAILED = "ไฟล์นี้ใช้ไม่ได้ รองรับ PNG, JPG, GIF ขนาดไม่เกิน 25 MB";
+const DOC_SWITCHES = [["toc", tr("สารบัญ")], ["step_count", tr("จำนวนขั้นตอน")],
+  ["created", tr("วันที่สร้าง")], ["updated", tr("วันที่แก้ไขล่าสุด")]];
+const UPLOAD_FAILED = tr("ไฟล์นี้ใช้ไม่ได้ รองรับ PNG, JPG, GIF ขนาดไม่เกิน 25 MB");
 let SAVET = null;
 // The guide's click-target style; new markers use it.
 const clickStyle = () => ({
@@ -361,12 +361,12 @@ async function saveNow() {
   let ok = false;
   try { ok = (await post("/api/guide/" + encodeURIComponent(GID), STATE)).ok; } catch { /* offline */ }
   if (!ok) {
-    if (!SAVE_FAILING) toastErr("บันทึกไม่สำเร็จ จะลองใหม่อัตโนมัติ");
+    if (!SAVE_FAILING) toastErr(tr("บันทึกไม่สำเร็จ จะลองใหม่อัตโนมัติ"));
     SAVE_FAILING = true;
     SAVET = setTimeout(saveNow, 3000);
   } else if (SAVE_FAILING) {
     SAVE_FAILING = false;
-    toast("บันทึกแล้ว");
+    toast(tr("บันทึกแล้ว"));
   }
   return ok;
 }
@@ -376,15 +376,15 @@ const flush = async () => !SAVET || await saveNow();
 
 function editPage() {
   app.innerHTML = `<header class="gtop">
-      <button class="icon-btn" id="back" title="กลับหน้าแรก" aria-label="กลับหน้าแรก">${ICON.back}</button>
-      <input id="title" class="gtitle" type="text" value="${esc(STATE.title)}" aria-label="ชื่อคู่มือ">
-      <button class="btn" id="done">${ICON.done} เสร็จสิ้น</button>
-      <button class="btn dark" id="exp">${ICON.export} ส่งออก</button>
+      <button class="icon-btn" id="back" title="${tr("กลับหน้าแรก")}" aria-label="${tr("กลับหน้าแรก")}">${ICON.back}</button>
+      <input id="title" class="gtitle" type="text" value="${esc(STATE.title)}" aria-label="${tr("ชื่อคู่มือ")}">
+      <button class="btn" id="done">${ICON.done} ${tr("เสร็จสิ้น")}</button>
+      <button class="btn dark" id="exp">${ICON.export} ${tr("ส่งออก")}</button>
     </header><div class="gbody edit"><div class="ewrap" id="ewrap"></div></div>
     <div class="etb">
-      <button type="button" class="tb" data-act="addpage" data-tip="เพิ่มลง Page">${ICON.page}</button>
-      <button type="button" class="tb" data-pop="click" data-tip="จุดคลิก (สี รูปทรง ขนาด)">${ICON.brush}</button>
-      <button type="button" class="tb" data-pop="doc" data-tip="ตั้งค่าเอกสาร">${ICON.sliders}</button>
+      <button type="button" class="tb" data-act="addpage" data-tip="${tr("เพิ่มลง Page")}">${ICON.page}</button>
+      <button type="button" class="tb" data-pop="click" data-tip="${tr("จุดคลิก (สี รูปทรง ขนาด)")}">${ICON.brush}</button>
+      <button type="button" class="tb" data-pop="doc" data-tip="${tr("ตั้งค่าเอกสาร")}">${ICON.sliders}</button>
       <div class="tbpop" id="tbpop" hidden></div>
     </div>`;
   app.querySelectorAll(".tb[data-tip]").forEach(b => b.setAttribute("aria-label", b.dataset.tip));
@@ -396,7 +396,7 @@ function editPage() {
     e.stopPropagation();
     const b = e.currentTarget;
     if (await flush()) exportMenu(b, GID);
-    else toastErr("ยังบันทึกการแก้ไขไม่ได้ จึงยังส่งออกไม่ได้ ลองใหม่อีกครั้ง");
+    else toastErr(tr("ยังบันทึกการแก้ไขไม่ได้ จึงยังส่งออกไม่ได้ ลองใหม่อีกครั้ง"));
   };
   document.querySelector('.tb[data-act="addpage"]').onclick = e => {
     e.stopPropagation(); addToPageMenu(e.currentTarget, GID);
@@ -439,18 +439,18 @@ function toggleToolPop(kind, btn) {
 
 function renderClickPop(pop) {
   const cur = clickStyle();
-  pop.innerHTML = `<div class="pop-h">จุดคลิก</div>
-    <div class="muted small">สี</div>
+  pop.innerHTML = `<div class="pop-h">${tr("จุดคลิก")}</div>
+    <div class="muted small">${tr("สี")}</div>
     <div class="sw">${SWATCHES.map(c =>
       `<button type="button" class="swatch${c === cur.color ? " on" : ""}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join("")}</div>
-    <div class="custom"><input type="color" id="cc" value="${cur.color.toLowerCase()}" title="เลือกสีเอง">
+    <div class="custom"><input type="color" id="cc" value="${cur.color.toLowerCase()}" title="${tr("เลือกสีเอง")}">
       <input type="text" id="hex" class="dlg-in" value="${cur.color}" maxlength="7" spellcheck="false"></div>
-    <div class="muted small">รูปทรง</div>
-    <div class="seg wide"><button type="button" data-shape="circle" class="${cur.shape === "circle" ? "on" : ""}">วงกลม</button>
-      <button type="button" data-shape="rect" class="${cur.shape === "rect" ? "on" : ""}">สี่เหลี่ยม</button></div>
-    <div class="muted small" style="margin-top:10px">ขนาด <b id="szl">${cur.size}</b></div>
+    <div class="muted small">${tr("รูปทรง")}</div>
+    <div class="seg wide"><button type="button" data-shape="circle" class="${cur.shape === "circle" ? "on" : ""}">${tr("วงกลม")}</button>
+      <button type="button" data-shape="rect" class="${cur.shape === "rect" ? "on" : ""}">${tr("สี่เหลี่ยม")}</button></div>
+    <div class="muted small" style="margin-top:10px">${tr("ขนาด")} <b id="szl">${cur.size}</b></div>
     <input type="range" id="csz" min="24" max="96" value="${cur.size}" class="full">
-    <div class="muted small">เปลี่ยนทุกวงในคู่มือนี้ และวงที่เพิ่มใหม่</div>`;
+    <div class="muted small">${tr("เปลี่ยนทุกวงในคู่มือนี้ และวงที่เพิ่มใหม่")}</div>`;
   pop.querySelectorAll(".swatch").forEach(b => b.onclick = () => setClickStyle({color: b.dataset.c}));
   pop.querySelector("#cc").onchange = e => setClickStyle({color: e.target.value});
   pop.querySelector("#hex").oninput = e => {
@@ -482,12 +482,12 @@ function setClickStyle(patch) {
 
 function renderDocPop(pop) {
   const S = STATE.settings, grid = S.layout === "grid";
-  pop.innerHTML = `<div class="pop-h">ตั้งค่าเอกสาร</div>
+  pop.innerHTML = `<div class="pop-h">${tr("ตั้งค่าเอกสาร")}</div>
     ${DOC_SWITCHES.map(([k, label]) => `<label class="srow"><span>${label}</span>
       <span class="switch"><input type="checkbox" data-k="${k}" ${S[k] ? "checked" : ""}><span></span></span></label>`).join("")}
-    <div class="pop-h" style="margin-top:12px">มุมมอง</div>
-    <div class="seg wide"><button type="button" data-l="linear" class="${grid ? "" : "on"}">${ICON.list} เรียงต่อกัน</button>
-      <button type="button" data-l="grid" class="${grid ? "on" : ""}">${ICON.grid} ตาราง</button></div>`;
+    <div class="pop-h" style="margin-top:12px">${tr("มุมมอง")}</div>
+    <div class="seg wide"><button type="button" data-l="linear" class="${grid ? "" : "on"}">${ICON.list} ${tr("เรียงต่อกัน")}</button>
+      <button type="button" data-l="grid" class="${grid ? "on" : ""}">${ICON.grid} ${tr("ตาราง")}</button></div>`;
   pop.querySelectorAll("input[data-k]").forEach(i => i.onchange = () => {
     S[i.dataset.k] = i.checked; scheduleSave();
   });
@@ -498,7 +498,7 @@ function renderDocPop(pop) {
 
 // ---- images: upload, add as a step, download one step's picture
 async function uploadImage(blob) {
-  toast("กำลังเพิ่มภาพ…", 1500);
+  toast(tr("กำลังเพิ่มภาพ…"), 1500);
   try {
     const r = await api("/api/guide/" + encodeURIComponent(GID) + "/image", {method: "POST", body: blob});
     if (r.ok) return (await r.json()).image;
@@ -517,9 +517,9 @@ async function autoRedact(step, force, before) {
   try {
     const r = await post("/api/guide/" + encodeURIComponent(GID) + "/redact",
       {image, existing: step.redactions || [], force: !!force});
-    res = r.ok ? await r.json() : {error: "ตรวจภาพไม่สำเร็จ"};
-  } catch { res = {error: "ตรวจภาพไม่สำเร็จ"}; }
-  if (res.error) { toastErr("ซ่อนข้อมูลอัตโนมัติไม่ได้: " + res.error); return null; }
+    res = r.ok ? await r.json() : {error: tr("ตรวจภาพไม่สำเร็จ")};
+  } catch { res = {error: tr("ตรวจภาพไม่สำเร็จ")}; }
+  if (res.error) { toastErr(tr("ซ่อนข้อมูลอัตโนมัติไม่ได้: {err}", {err: res.error})); return null; }
   if (step.image !== image) return 0;  // replaced meanwhile; those rects were for the old one
   if (res.rects.length) {
     before?.();
@@ -550,15 +550,15 @@ async function downloadStepImage(step) {
       ? await (await api("/img/" + encodeURIComponent(GID) + "/" + encodeURIComponent(step.image))).blob()
       : await renderStepPng(step, GID);
   } catch {
-    return toastErr("เปิดภาพนี้ไม่ได้");
+    return toastErr(tr("เปิดภาพนี้ไม่ได้"));
   }
   let r;
   try {
     r = await (await api("/api/guide/" + encodeURIComponent(GID) + "/download?n=" + n,
       {method: "POST", body})).json();
-  } catch { r = {error: "ดาวน์โหลดไม่สำเร็จ"}; }
-  if (r.error) toastErr("บันทึกภาพไม่สำเร็จ: " + r.error);
-  else if (r.saved) toast("บันทึกภาพแล้ว");
+  } catch { r = {error: tr("ดาวน์โหลดไม่สำเร็จ")}; }
+  if (r.error) toastErr(tr("บันทึกภาพไม่สำเร็จ: {err}", {err: r.error}));
+  else if (r.saved) toast(tr("บันทึกภาพแล้ว"));
 }
 
 // ---- steps (linear cards or grid thumbnails)
@@ -577,8 +577,8 @@ function renderSteps() {
   }
   const bar = document.createElement("div");
   bar.className = "addbar";
-  bar.innerHTML = `<button type="button" class="btn addnote">+ เพิ่มหมายเหตุ</button>
-    <button type="button" class="btn addimg">+ เพิ่มภาพ</button>
+  bar.innerHTML = `<button type="button" class="btn addnote">+ ${tr("เพิ่มหมายเหตุ")}</button>
+    <button type="button" class="btn addimg">+ ${tr("เพิ่มภาพ")}</button>
     <input type="file" accept="image/png,image/jpeg,image/gif" hidden>`;
   bar.querySelector(".addnote").onclick = () => {
     const note = {id: newStepId(), kind: "note", text: "", image: null, crop: null,
@@ -613,8 +613,8 @@ function dragSource(el, i) {
 }
 
 const stepBadge = num => num
-  ? `<div class="num drag" title="ลากเพื่อสลับลำดับ">${num}</div>`
-  : `<div class="notetag drag" title="ลากเพื่อสลับลำดับ">หมายเหตุ</div>`;
+  ? `<div class="num drag" title="${tr("ลากเพื่อสลับลำดับ")}">${num}</div>`
+  : `<div class="notetag drag" title="${tr("ลากเพื่อสลับลำดับ")}">${tr("หมายเหตุ")}</div>`;
 
 function stepCard(step, i, num) {
   const el = document.createElement("div");
@@ -625,13 +625,13 @@ function stepCard(step, i, num) {
     title="${label}" aria-label="${label}" ${on ? "" : "disabled"}>${icon}</button>`;
   el.innerHTML = `<div class="row1">${stepBadge(num)}
       <div class="txt">${num ? `<div class="kindtag">${esc(KIND_TH[step.kind] || step.kind)}</div>` : ""}
-        <input type="text" class="stext" value="${esc(step.text)}" aria-label="${num ? "ข้อความขั้นที่ " + num : "หมายเหตุ"}"
-          placeholder="${step.kind === "image" ? "คำอธิบายภาพ" : step.kind === "note" ? "พิมพ์หมายเหตุ" : ""}"></div>
-      <div class="sbtns">${ib("up", "เลื่อนขึ้น", ICON.up, i > 0)}${ib("down", "เลื่อนลง", ICON.down, i < last)}
-        ${ib("del", "ลบขั้นตอนนี้", ICON.trash)}</div></div>`;
+        <input type="text" class="stext" value="${esc(step.text)}" aria-label="${num ? tr("ข้อความขั้นที่ {n}", {n: num}) : tr("หมายเหตุ")}"
+          placeholder="${step.kind === "image" ? tr("คำอธิบายภาพ") : step.kind === "note" ? tr("พิมพ์หมายเหตุ") : ""}"></div>
+      <div class="sbtns">${ib("up", tr("เลื่อนขึ้น"), ICON.up, i > 0)}${ib("down", tr("เลื่อนลง"), ICON.down, i < last)}
+        ${ib("del", tr("ลบขั้นตอนนี้"), ICON.trash)}</div></div>`;
   el.querySelector(".stext").oninput = e => { step.text = e.target.value; scheduleSave(); };
   el.querySelector('[data-act="del"]').onclick = async () => {
-    if (!await uiConfirm("ลบขั้นตอนนี้?", "ลบ")) return;
+    if (!await uiConfirm(tr("ลบขั้นตอนนี้?"), tr("ลบ"))) return;
     STATE.steps.splice(STATE.steps.indexOf(step), 1);
     renderSteps(); scheduleSave();
   };
@@ -660,11 +660,11 @@ function stepCard(step, i, num) {
 function stepPreview(step) {
   const box = document.createElement("div");
   box.innerHTML = `<div class="etools">
-      <button type="button" class="btn ed">${ICON.edit} แก้ไขภาพ</button>
-      <button type="button" class="btn dl">${ICON.export} ดาวน์โหลดภาพ</button></div>
+      <button type="button" class="btn ed">${ICON.edit} ${tr("แก้ไขภาพ")}</button>
+      <button type="button" class="btn dl">${ICON.export} ${tr("ดาวน์โหลดภาพ")}</button></div>
     <div class="eprev"></div>`;
   const tools = box.querySelector(".etools"), prev = box.querySelector(".eprev");
-  const fail = () => { tools.hidden = true; prev.innerHTML = '<div class="imgfail">เปิดภาพนี้ไม่ได้</div>'; };
+  const fail = () => { tools.hidden = true; prev.innerHTML = '<div class="imgfail">' + esc(tr("เปิดภาพนี้ไม่ได้")) + "</div>"; };
   if (isGif(step)) {
     const im = document.createElement("img");
     im.alt = ""; im.onerror = fail; im.src = imgUrl(GID, step.image);
@@ -686,9 +686,9 @@ function gridCard(step, i, num) {
   const el = document.createElement("div");
   el.className = "gcard";
   el.draggable = true;
-  el.title = "คลิกเพื่อแก้ไขขั้นตอนนี้";
+  el.title = tr("คลิกเพื่อแก้ไขขั้นตอนนี้");
   el.innerHTML = `<div class="gthumb"></div>
-    <div class="gcap">${num ? `<span class="num">${num}</span>` : `<span class="notetag">หมายเหตุ</span>`}
+    <div class="gcap">${num ? `<span class="num">${num}</span>` : `<span class="notetag">${tr("หมายเหตุ")}</span>`}
       <span class="gt">${esc(step.text)}</span></div>`;
   const thumb = el.querySelector(".gthumb");
   const text = t => { thumb.innerHTML = `<div class="gtext">${esc(t)}</div>`; };
@@ -696,14 +696,14 @@ function gridCard(step, i, num) {
     text(step.text);
   } else if (isGif(step)) {
     const im = document.createElement("img");
-    im.alt = ""; im.onerror = () => text("เปิดภาพนี้ไม่ได้"); im.src = imgUrl(GID, step.image);
+    im.alt = ""; im.onerror = () => text(tr("เปิดภาพนี้ไม่ได้")); im.src = imgUrl(GID, step.image);
     thumb.appendChild(im);
   } else {
     const cv = document.createElement("canvas");
     thumb.appendChild(cv);
     const img = new Image();
     img.onload = () => drawStepCanvas(cv, img, step, 480);
-    img.onerror = () => text("เปิดภาพนี้ไม่ได้");
+    img.onerror = () => text(tr("เปิดภาพนี้ไม่ได้"));
     img.src = imgUrl(GID, step.image);
   }
   dragSource(el, i); dropTarget(el, i);
@@ -714,6 +714,6 @@ function gridCard(step, i, num) {
     if (!pop.hidden && pop.dataset.kind === "doc") renderDocPop(pop);
     document.getElementById("edit-" + step.id)?.scrollIntoView({block: "start"});
     document.querySelector("#edit-" + step.id + " .stext")?.focus({preventScroll: true});
-  }, num ? "แก้ไขขั้นที่ " + num : "แก้ไขหมายเหตุ");
+  }, num ? tr("แก้ไขขั้นที่ {n}", {n: num}) : tr("แก้ไขหมายเหตุ"));
   return el;
 }

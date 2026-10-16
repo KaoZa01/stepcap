@@ -5,8 +5,8 @@
 
 let PID = null, PG = null, PSAVET = null;
 const goPage = (id, mode) => nav({pg: id, mode: mode || "view"});
-const PAGE_SWITCHES = [["toc", "สารบัญ"], ["step_count", "จำนวนคู่มือ"],
-  ["created", "วันที่สร้าง"], ["updated", "วันที่แก้ไขล่าสุด"]];
+const PAGE_SWITCHES = [["toc", tr("สารบัญ")], ["step_count", tr("จำนวนคู่มือ")],
+  ["created", tr("วันที่สร้าง")], ["updated", tr("วันที่แก้ไขล่าสุด")]];
 
 async function pageDocPage(id, mode) {
   PID = id;
@@ -33,10 +33,10 @@ async function pageDocPage(id, mode) {
 
 function pageView() {
   app.innerHTML = `<header class="gtop">
-      <button class="icon-btn" id="back" title="กลับไปที่ Pages" aria-label="กลับไปที่ Pages">${ICON.back}</button>
+      <button class="icon-btn" id="back" title="${tr("กลับไปที่ Pages")}" aria-label="${tr("กลับไปที่ Pages")}">${ICON.back}</button>
       <div class="gtitle">${esc(PG.title)}</div>
-      <button class="btn" id="edit">${ICON.edit} แก้ไข</button>
-      <button class="btn dark" id="exp">${ICON.export} ส่งออก</button>
+      <button class="btn" id="edit">${ICON.edit} ${tr("แก้ไข")}</button>
+      <button class="btn dark" id="exp">${ICON.export} ${tr("ส่งออก")}</button>
     </header><div class="gbody"><div id="rg"></div></div>`;
   document.getElementById("back").onclick = () => nav({page: "pages"});
   document.getElementById("edit").onclick = () => goPage(PID, "edit");
@@ -50,17 +50,17 @@ function pageView() {
 // ---- edit
 function pageEdit() {
   app.innerHTML = `<header class="gtop">
-      <button class="icon-btn" id="back" title="กลับไปที่ Pages" aria-label="กลับไปที่ Pages">${ICON.back}</button>
-      <input id="ptitle" class="gtitle" type="text" value="${esc(PG.title)}" aria-label="ชื่อ Page">
-      <button class="btn" id="done">${ICON.done} เสร็จสิ้น</button>
-      <button class="btn dark" id="exp">${ICON.export} ส่งออก</button>
+      <button class="icon-btn" id="back" title="${tr("กลับไปที่ Pages")}" aria-label="${tr("กลับไปที่ Pages")}">${ICON.back}</button>
+      <input id="ptitle" class="gtitle" type="text" value="${esc(PG.title)}" aria-label="${tr("ชื่อ Page")}">
+      <button class="btn" id="done">${ICON.done} ${tr("เสร็จสิ้น")}</button>
+      <button class="btn dark" id="exp">${ICON.export} ${tr("ส่งออก")}</button>
     </header><div class="gbody"><div class="pedit">
-      <textarea id="pdesc" class="dlg-in" rows="2" placeholder="คำอธิบาย (ไม่ใส่ก็ได้)" aria-label="คำอธิบาย">${esc(PG.description)}</textarea>
+      <textarea id="pdesc" class="dlg-in" rows="2" placeholder="${tr("คำอธิบาย (ไม่ใส่ก็ได้)")}" aria-label="${tr("คำอธิบาย")}">${esc(PG.description)}</textarea>
       <div class="pset">${PAGE_SWITCHES.map(([k, l]) => `<label class="swlabel"><span class="switch">
         <input type="checkbox" data-k="${k}" ${PG.settings[k] ? "checked" : ""}><span></span></span>${l}</label>`).join("")}</div>
       <div id="psecs"></div>
-      <div class="padd"><button type="button" class="btn" id="addguide">${ICON.plus} เพิ่มคู่มือ</button>
-        <button type="button" class="btn" id="addtext">${ICON.plus} เพิ่มข้อความ</button></div>
+      <div class="padd"><button type="button" class="btn" id="addguide">${ICON.plus} ${tr("เพิ่มคู่มือ")}</button>
+        <button type="button" class="btn" id="addtext">${ICON.plus} ${tr("เพิ่มข้อความ")}</button></div>
     </div></div>`;
   const drop = () => { clearTimeout(PSAVET); PSAVET = null; PSAVE_FAILING = false; };
   const leave = to => leaveEdit(pageFlush, drop, to);
@@ -70,7 +70,7 @@ function pageEdit() {
     e.stopPropagation();
     const b = e.currentTarget;
     if (await pageFlush()) exportMenu(b, PID, "page");
-    else toastErr("ยังบันทึกการแก้ไขไม่ได้ จึงยังส่งออกไม่ได้ ลองใหม่อีกครั้ง");
+    else toastErr(tr("ยังบันทึกการแก้ไขไม่ได้ จึงยังส่งออกไม่ได้ ลองใหม่อีกครั้ง"));
   };
   document.getElementById("ptitle").oninput = e => { PG.title = e.target.value; pageSave(); };
   document.getElementById("pdesc").oninput = e => { PG.description = e.target.value; pageSave(); };
@@ -92,16 +92,16 @@ function renderSections() {
   box.innerHTML = PG.sections.map((s, i) => {
     const ib = (act, label, icon, on = true) => `<button type="button" class="icon-btn" data-act="${act}"
       title="${label}" aria-label="${label}" ${on ? "" : "disabled"}>${icon}</button>`;
-    const btns = `<div class="pbtns">${ib("up", "เลื่อนขึ้น", ICON.up, i > 0)}${ib("down", "เลื่อนลง", ICON.down, i < last)}
-      ${ib("del", "นำออกจาก Page", ICON.trash)}</div>`;
+    const btns = `<div class="pbtns">${ib("up", tr("เลื่อนขึ้น"), ICON.up, i > 0)}${ib("down", tr("เลื่อนลง"), ICON.down, i < last)}
+      ${ib("del", tr("นำออกจาก Page"), ICON.trash)}</div>`;
     if (s.type === "text") return `<div class="psec text" data-i="${i}">
-      <div class="pmain"><input class="dlg-in" data-f="title" placeholder="หัวข้อ" aria-label="หัวข้อ" value="${esc(s.title)}">
-      <textarea class="dlg-in" data-f="text" rows="3" placeholder="ข้อความ" aria-label="ข้อความ">${esc(s.text)}</textarea></div>${btns}</div>`;
+      <div class="pmain"><input class="dlg-in" data-f="title" placeholder="${tr("หัวข้อ")}" aria-label="${tr("หัวข้อ")}" value="${esc(s.title)}">
+      <textarea class="dlg-in" data-f="text" rows="3" placeholder="${tr("ข้อความ")}" aria-label="${tr("ข้อความ")}">${esc(s.text)}</textarea></div>${btns}</div>`;
     const g = PG.guides[s.guide];
     return `<div class="psec" data-i="${i}" data-gid="${esc(s.guide)}"><div class="pmain">${g
       ? `${ICON.docs}<a href="#" data-act="open">${esc(g.title || s.guide)}</a>`
-      : `<span class="muted">คู่มือนี้ถูกลบแล้ว</span>`}</div>${btns}</div>`;
-  }).join("") || `<p class="empty">ยังไม่มีคู่มือใน Page นี้ กด เพิ่มคู่มือ ด้านล่าง</p>`;
+      : `<span class="muted">${tr("คู่มือนี้ถูกลบแล้ว")}</span>`}</div>${btns}</div>`;
+  }).join("") || `<p class="empty">${tr("ยังไม่มีคู่มือใน Page นี้ กด เพิ่มคู่มือ ด้านล่าง")}</p>`;
   box.querySelectorAll(".psec").forEach(row => {
     const i = +row.dataset.i;
     const move = (d, act) => {
@@ -116,7 +116,7 @@ function renderSections() {
     row.querySelector("[data-act=del]").onclick = async () => {
       const sec = PG.sections[i];  // typed text is lost on removal: ask first
       if (sec.type === "text" && (sec.title || sec.text).trim() &&
-          !(await uiConfirm("นำข้อความนี้ออก? ข้อความที่พิมพ์ไว้จะหายไป", "นำออก"))) return;
+          !(await uiConfirm(tr("นำข้อความนี้ออก? ข้อความที่พิมพ์ไว้จะหายไป"), tr("นำออก")))) return;
       PG.sections.splice(i, 1); renderSections(); pageSave();
     };
     row.querySelector("[data-act=open]")?.addEventListener("click", async e => {
@@ -133,12 +133,12 @@ function renderSections() {
 async function pickGuides() {
   const all = await getJSON("/api/guides");
   const have = new Set(PG.sections.filter(s => s.type === "guide").map(s => s.guide));
-  const d = await _dialog(`<p class="dlg-t">เพิ่มคู่มือ</p>
-    <input class="dlg-in" type="text" id="pq" placeholder="ค้นหา">
+  const d = await _dialog(`<p class="dlg-t">${tr("เพิ่มคู่มือ")}</p>
+    <input class="dlg-in" type="text" id="pq" placeholder="${tr("ค้นหา")}">
     <div class="plist">${all.filter(g => !g.broken).map(g => `<label class="chk prow" data-t="${esc(g.title.toLowerCase())}">
       <input type="checkbox" data-gid="${esc(g.id)}" ${have.has(g.id) ? "checked disabled" : ""}>
-      <span>${esc(g.title)} <span class="pmeta">· ${g.count} ขั้นตอน · ${esc(g.ago)}</span></span></label>`).join("")
-      || `<p class="muted">ยังไม่มีคู่มือ</p>`}</div>`, "เพิ่ม", "dark", dlg => {
+      <span>${esc(g.title)} <span class="pmeta">· ${tr("{n} ขั้นตอน", {n: g.count})} · ${esc(g.ago)}</span></span></label>`).join("")
+      || `<p class="muted">${tr("ยังไม่มีคู่มือ")}</p>`}</div>`, tr("เพิ่ม"), "dark", dlg => {
     const q = dlg.querySelector("#pq");
     q.oninput = () => dlg.querySelectorAll(".prow").forEach(r =>
       r.hidden = !r.dataset.t.includes(q.value.trim().toLowerCase()));
@@ -160,12 +160,12 @@ async function pageSaveNow() {
   clearTimeout(PSAVET); PSAVET = null;
   const ok = await postOk("/api/page/" + encodeURIComponent(PID), PG);
   if (!ok) {
-    if (!PSAVE_FAILING) toastErr("บันทึกไม่สำเร็จ จะลองใหม่อัตโนมัติ");
+    if (!PSAVE_FAILING) toastErr(tr("บันทึกไม่สำเร็จ จะลองใหม่อัตโนมัติ"));
     PSAVE_FAILING = true;
     PSAVET = setTimeout(pageSaveNow, 3000);
   } else if (PSAVE_FAILING) {
     PSAVE_FAILING = false;
-    toast("บันทึกแล้ว");
+    toast(tr("บันทึกแล้ว"));
   }
   return ok;
 }
@@ -177,15 +177,15 @@ async function renderPages(c) {
   const items = await getJSON("/api/pages");
   if (my !== RENDER) return;
   c.innerHTML = `<div class="sec-h"><h2>Pages</h2>
-      <button type="button" class="btn" id="newpage">${ICON.plus} สร้าง Page</button></div>
-    <p class="muted">รวมหลายคู่มือเป็นเอกสารเดียว ส่งต่อหรือส่งออกได้ครั้งเดียว</p>
+      <button type="button" class="btn" id="newpage">${ICON.plus} ${tr("สร้าง Page")}</button></div>
+    <p class="muted">${tr("รวมหลายคู่มือเป็นเอกสารเดียว ส่งต่อหรือส่งออกได้ครั้งเดียว")}</p>
     ${items.length ? `<div class="pcards">${items.map(p => `<div class="pcard" data-id="${esc(p.id)}">
         <div class="pc-title">${esc(p.title)}</div>
-        <div class="muted small">${p.count} คู่มือ · ${esc(p.ago || "")}</div>
-        <button type="button" class="tool more" title="เพิ่มเติม" aria-label="เพิ่มเติม">${ICON.more}</button></div>`).join("")}</div>`
-      : `<p class="empty">ยังไม่มี Page กด สร้าง Page เพื่อรวมหลายคู่มือเป็นเอกสารเดียว</p>`}`;
+        <div class="muted small">${tr("{n} คู่มือ", {n: p.count})} · ${esc(p.ago || "")}</div>
+        <button type="button" class="tool more" title="${tr("เพิ่มเติม")}" aria-label="${tr("เพิ่มเติม")}">${ICON.more}</button></div>`).join("")}</div>`
+      : `<p class="empty">${tr("ยังไม่มี Page กด สร้าง Page เพื่อรวมหลายคู่มือเป็นเอกสารเดียว")}</p>`}`;
   c.querySelector("#newpage").onclick = e => busy(e.currentTarget, async () => {
-    const title = await uiPrompt("ชื่อ Page", "");
+    const title = await uiPrompt(tr("ชื่อ Page"), "");
     if (title === null || !title.trim()) return;
     const id = await newPage(title.trim());
     if (id) goPage(id, "edit");
@@ -197,19 +197,19 @@ async function renderPages(c) {
       e.stopPropagation();
       const anchor = e.currentTarget, url = "/api/page/" + encodeURIComponent(id);
       popMenu(anchor, [
-        {label: "เปิด", run: () => goPage(id, "view")},
-        {label: "เปลี่ยนชื่อ", run: async () => {
-          const title = await uiPrompt("เปลี่ยนชื่อ Page", p.title);
+        {label: tr("เปิด"), run: () => goPage(id, "view")},
+        {label: tr("เปลี่ยนชื่อ"), run: async () => {
+          const title = await uiPrompt(tr("เปลี่ยนชื่อ Page"), p.title);
           if (title === null || !title.trim()) return;
           let ok = false;
           try { ok = await postOk(url, {...(await getJSON(url)), title: title.trim()}); } catch { /* gone */ }
-          if (ok) toast("เปลี่ยนชื่อแล้ว"); else toastErr(FAILED);
+          if (ok) toast(tr("เปลี่ยนชื่อแล้ว")); else toastErr(FAILED);
           refresh();
         }},
-        {label: "ส่งออก", run: () => exportMenu(anchor, id, "page")},
-        {label: "ลบ", danger: true, run: async () => {
-          if (!(await uiConfirm("ลบ Page นี้? คู่มือข้างในไม่ถูกลบ", "ลบ"))) return;
-          if (await postOk(url + "/delete")) toast("ลบ Page แล้ว"); else toastErr(FAILED);
+        {label: tr("ส่งออก"), run: () => exportMenu(anchor, id, "page")},
+        {label: tr("ลบ"), danger: true, run: async () => {
+          if (!(await uiConfirm(tr("ลบ Page นี้? คู่มือข้างในไม่ถูกลบ"), tr("ลบ")))) return;
+          if (await postOk(url + "/delete")) toast(tr("ลบ Page แล้ว")); else toastErr(FAILED);
           refresh();
         }},
       ]);
@@ -236,13 +236,13 @@ async function addToPageMenu(anchor, gid) {
       const r = await post("/api/page/" + encodeURIComponent(pid) + "/add", {guide: gid});
       res = r.ok ? (await r.json()).result : null;
     } catch { /* offline */ }
-    if (res) toast(res === "added" ? `เพิ่มลงใน ${title} แล้ว` : "มีอยู่ใน Page นี้แล้ว");
+    if (res) toast(res === "added" ? tr("เพิ่มลงใน {title} แล้ว", {title}) : tr("มีอยู่ใน Page นี้แล้ว"));
     else toastErr(FAILED);
   };
   popMenu(anchor, [
     ...pages.map(p => ({label: p.title, run: () => add(p.id, p.title)})),
-    {label: "+ สร้าง Page ใหม่", run: async () => {
-      const title = await uiPrompt("ชื่อ Page", STATE?.title || "");
+    {label: "+ " + tr("สร้าง Page ใหม่"), run: async () => {
+      const title = await uiPrompt(tr("ชื่อ Page"), STATE?.title || "");
       if (title === null || !title.trim()) return;
       const id = await newPage(title.trim());
       if (id) add(id, title.trim());

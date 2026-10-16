@@ -6,28 +6,30 @@
 "use strict";
 
 const _q = sel => () => document.querySelector(sel);
+// the sample guide's title in either language (one added in Thai stays Thai)
+const SAMPLE_PREFIXES = ["ตัวอย่าง:", "Sample:"];  // i18n-ok
 const TOURS = {
   home: [
-    {target: _q("#recbtn"), title: "เริ่มบันทึกที่นี่",
-     text: "กดแล้วเลือกจอ แล้วกด เริ่มบันทึก หน้าต่างนี้จะย่อลง ให้ทำงานตามปกติ แล้วกด หยุดบันทึก ที่แผงมุมขวาล่าง หรือกด Ctrl+Alt+R"},
+    {target: _q("#recbtn"), title: tr("เริ่มบันทึกที่นี่"),
+     text: tr("กดแล้วเลือกจอ แล้วกด เริ่มบันทึก หน้าต่างนี้จะย่อลง ให้ทำงานตามปกติ แล้วกด หยุดบันทึก ที่แผงมุมขวาล่าง หรือกด Ctrl+Alt+R")},
     {target: () => [...document.querySelectorAll(".card .title, .row .r-title")]
-       .find(e => e.textContent.startsWith("ตัวอย่าง:"))?.closest(".card, .row") || null,
-     title: "ดูตัวอย่างก่อน",
-     text: "เปิดคู่มือนี้เพื่อดูว่าคู่มือที่เสร็จแล้วหน้าตาเป็นอย่างไร ลองแก้หรือส่งออกได้ตามสบาย"},
-    {target: _q(".menu"), title: "เมนูอื่น ๆ",
-     text: "Page ใช้รวมหลายคู่มือเป็นเอกสารเดียว ถังขยะกู้คืนได้ ตั้งค่ามีที่เก็บไฟล์และปุ่มดูคำแนะนำนี้อีกครั้ง"},
+       .find(e => SAMPLE_PREFIXES.some(p => e.textContent.startsWith(p)))?.closest(".card, .row") || null,
+     title: tr("ดูตัวอย่างก่อน"),
+     text: tr("เปิดคู่มือนี้เพื่อดูว่าคู่มือที่เสร็จแล้วหน้าตาเป็นอย่างไร ลองแก้หรือส่งออกได้ตามสบาย")},
+    {target: _q(".menu"), title: tr("เมนูอื่น ๆ"),
+     text: tr("Page ใช้รวมหลายคู่มือเป็นเอกสารเดียว ถังขยะกู้คืนได้ ตั้งค่ามีที่เก็บไฟล์และปุ่มดูคำแนะนำนี้อีกครั้ง")},
   ],
   edit: [
-    {target: _q(".step .stext"), title: "แก้ข้อความ",
-     text: "พิมพ์แก้คำอธิบายของแต่ละขั้นได้เลย ระบบบันทึกให้อัตโนมัติ"},
-    {target: _q(".step .sbtns"), title: "จัดลำดับ",
-     text: "เลื่อนขั้นขึ้นลง หรือลบขั้นที่ไม่ต้องการ"},
-    {target: _q(".step .etools:not([hidden]) .ed"), title: "แก้ภาพ",
-     text: "ใส่ลูกศร กรอบ ข้อความ เบลอข้อมูลที่ไม่ควรให้เห็น หรือครอปภาพ"},
-    {target: _q(".etb"), title: "เครื่องมือเพิ่มเติม",
-     text: "เพิ่มคู่มือนี้ลง Page เปลี่ยนสีและรูปทรงของจุดคลิก และเลือกว่าจะแสดงสารบัญหรือวันที่ในเอกสาร"},
-    {target: _q("#exp"), title: "ส่งออก",
-     text: "เลือก Word, PDF, HTML หรือ Markdown ก่อนส่งให้คนอื่น ให้ตรวจภาพอีกครั้ง และส่งเฉพาะไฟล์ที่ส่งออก"},
+    {target: _q(".step .stext"), title: tr("แก้ข้อความ"),
+     text: tr("พิมพ์แก้คำอธิบายของแต่ละขั้นได้เลย ระบบบันทึกให้อัตโนมัติ")},
+    {target: _q(".step .sbtns"), title: tr("จัดลำดับ"),
+     text: tr("เลื่อนขั้นขึ้นลง หรือลบขั้นที่ไม่ต้องการ")},
+    {target: _q(".step .etools:not([hidden]) .ed"), title: tr("แก้ภาพ"),
+     text: tr("ใส่ลูกศร กรอบ ข้อความ เบลอข้อมูลที่ไม่ควรให้เห็น หรือครอปภาพ")},
+    {target: _q(".etb"), title: tr("เครื่องมือเพิ่มเติม"),
+     text: tr("เพิ่มคู่มือนี้ลง Page เปลี่ยนสีและรูปทรงของจุดคลิก และเลือกว่าจะแสดงสารบัญหรือวันที่ในเอกสาร")},
+    {target: _q("#exp"), title: tr("ส่งออก"),
+     text: tr("เลือก Word, PDF, HTML หรือ Markdown ก่อนส่งให้คนอื่น ให้ตรวจภาพอีกครั้ง และส่งเฉพาะไฟล์ที่ส่งออก")},
   ],
 };
 
@@ -91,9 +93,9 @@ function runTour(stops) {
       s.target()?.scrollIntoView({block: "nearest"});
       box.innerHTML = `<p class="tour-title" id="tour-t">${esc(s.title)}</p><p class="tour-text">${esc(s.text)}</p>
         <div class="tour-foot"><span class="tour-count">${i + 1}/${live.length}</span>
-          <button type="button" class="btn" data-t="skip">ข้าม</button>
-          <button type="button" class="btn" data-t="back" ${i ? "" : "disabled"}>ย้อนกลับ</button>
-          <button type="button" class="btn dark" data-t="next">${last ? "เสร็จสิ้น" : "ถัดไป"}</button></div>`;
+          <button type="button" class="btn" data-t="skip">${tr("ข้าม")}</button>
+          <button type="button" class="btn" data-t="back" ${i ? "" : "disabled"}>${tr("ย้อนกลับ")}</button>
+          <button type="button" class="btn dark" data-t="next">${last ? tr("เสร็จสิ้น") : tr("ถัดไป")}</button></div>`;
       box.querySelector("[data-t=skip]").onclick = close;
       box.querySelector("[data-t=back]").onclick = () => show(i - 1);
       box.querySelector("[data-t=next]").onclick = () => last ? close() : show(i + 1);

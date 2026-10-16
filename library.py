@@ -15,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+import i18n
+from i18n import tr
 import redact
 
 DEFAULT_SETTINGS = {"toc": False, "step_count": False, "created": False,
@@ -23,8 +25,9 @@ DEFAULT_SETTINGS = {"toc": False, "step_count": False, "created": False,
                     "click_size": 44}
 DEFAULT_APP_SETTINGS = {"monitor": None, "view": "grid", "redact_on": True,
                         "redact_rules": list(redact.RULES), "redact_custom": [],
-                        "sample_added": False, "tours_seen": []}
-SAMPLE_TITLE = "ตัวอย่าง: เริ่มต้นใช้ StepCap"
+                        "sample_added": False, "tours_seen": [], "lang": "th"}
+SAMPLE_TITLES = {"th": "ตัวอย่าง: เริ่มต้นใช้ StepCap",  # i18n-ok
+                 "en": "Sample: Getting started with StepCap"}
 TOURS = ("home", "edit")  # the screens that have a first-time tour
 
 MAX_IMAGE = 25 * 1024 * 1024  # bytes per uploaded image
@@ -34,7 +37,6 @@ _MAGIC = ((b"\x89PNG\r\n\x1a\n", "png"), (b"\xff\xd8\xff", "jpg"),
 _LAYERS = ("markers", "annotations", "redactions")
 
 TRASH = "_trash"
-COPY_SUFFIX = " (สำเนา)"
 
 
 def safe_name(name: str) -> bool:
@@ -155,17 +157,17 @@ def rel_time(iso: str, now: datetime) -> str:
     except (TypeError, ValueError):
         return ""
     if secs < 60:
-        return "เมื่อสักครู่"
+        return tr("เมื่อสักครู่")
     if secs < 3600:
-        return f"{int(secs // 60)} นาทีที่แล้ว"
+        return tr("{n} นาทีที่แล้ว", n=int(secs // 60))
     if secs < 86400:
-        return f"{int(secs // 3600)} ชั่วโมงที่แล้ว"
+        return tr("{n} ชั่วโมงที่แล้ว", n=int(secs // 3600))
     days = int(secs // 86400)
     if days < 30:
-        return f"{days} วันที่แล้ว"
+        return tr("{n} วันที่แล้ว", n=days)
     if days < 365:
-        return f"{days // 30} เดือนที่แล้ว"
-    return f"{days // 365} ปีที่แล้ว"
+        return tr("{n} เดือนที่แล้ว", n=days // 30)
+    return tr("{n} ปีที่แล้ว", n=days // 365)
 
 
 def _matches(g: dict, q: str) -> bool:
@@ -252,7 +254,7 @@ def duplicate_guide(storage: Path, gid: str) -> str | None:
     shutil.copytree(src, storage / new)
     g = _load_raw(storage / new)
     stamp = now_iso()
-    g.update(id=new, title=(g.get("title") or gid) + COPY_SUFFIX,
+    g.update(id=new, title=(g.get("title") or gid) + tr(" (สำเนา)"),
              created=stamp, updated=stamp, bookmarked=False)
     write_json_atomic(storage / new / "guide.json", g)
     return new
@@ -383,6 +385,8 @@ def _clean_settings(d: dict) -> dict:
     for k in ("redact_on", "sample_added"):
         if not isinstance(out.get(k, True), bool):
             del out[k]
+    if out.get("lang", "th") not in i18n.LANGS:
+        del out["lang"]
     if "tours_seen" in out:
         v = out["tours_seen"]
         out["tours_seen"] = [t for t in TOURS if isinstance(v, list) and t in v]
@@ -395,6 +399,25 @@ def _clean_settings(d: dict) -> dict:
     if "redact_custom" in out:
         out["redact_custom"] = [w.strip() for w in out["redact_custom"] if w.strip()]
     return out
+
+
+def ensure_lang(storage: Path, windows_thai: bool) -> str:
+    """The language to start in. Only a fresh storage (no settings.json, no
+    guide) takes it from Windows and saves it; anyone already using StepCap
+    stays Thai until they change it, and an unreadable settings.json is left
+    as it is."""
+    f = storage / "settings.json"
+    if f.exists():
+        try:
+            raw = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return "th"
+        return raw.get("lang") if isinstance(raw, dict) and raw.get("lang") in i18n.LANGS else "th"
+    if storage.is_dir() and any((p / "guide.json").exists() for p in storage.iterdir() if p.is_dir()):
+        return "th"
+    lang = "th" if windows_thai else "en"
+    save_settings(storage, lang=lang)
+    return lang
 
 
 def save_settings(storage: Path, **changes) -> dict:
@@ -530,7 +553,7 @@ def compile_page(page: dict, guides: dict[str, dict | None]) -> tuple[dict, int]
         gid, g = s["guide"], guides.get(s["guide"])
         if g is None:
             missing += 1
-            steps.append({**sec, "text": "คู่มือนี้ถูกลบแล้ว", "missing": True, "gid": gid})
+            steps.append({**sec, "text": tr("คู่มือนี้ถูกลบแล้ว"), "missing": True, "gid": gid})
             continue
         count += 1
         steps.append({**sec, "text": g.get("title", ""), "gid": gid})
@@ -540,5 +563,5 @@ def compile_page(page: dict, guides: dict[str, dict | None]) -> tuple[dict, int]
            "created": page.get("created", ""), "updated": page.get("updated", ""),
            "settings": {**settings, "step_count": False}, "steps": steps}
     if settings.get("step_count"):
-        doc["meta_count"] = f"{count} คู่มือ"
+        doc["meta_count"] = tr("{n} คู่มือ", n=count)
     return doc, missing

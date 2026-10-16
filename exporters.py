@@ -11,17 +11,24 @@ import zipfile
 from datetime import datetime
 from io import BytesIO
 
-_TH_MONTHS = ("ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
-              "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.")
+import i18n
+from i18n import tr
+
+_MONTHS = {"th": ("ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",  # i18n-ok
+                  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."),  # i18n-ok
+           "en": ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")}
 
 
-def thai_date(iso: str) -> str:
-    """'2026-10-16T10:00:00' -> '16 ต.ค. 2569', like the page's th-TH date."""
+def doc_date(iso: str) -> str:
+    """'2026-10-16T10:00:00' -> '16 Oct 2026' (Thai: Buddhist year), like the
+    page's own date."""
     try:
         d = datetime.fromisoformat(iso)
     except (TypeError, ValueError):
         return ""
-    return f"{d.day} {_TH_MONTHS[d.month - 1]} {d.year + 543}"
+    year = d.year if i18n.LANG == "en" else d.year + 543
+    return f"{d.day} {_MONTHS[i18n.LANG][d.month - 1]} {year}"
 
 
 def numbered(guide: dict) -> list[tuple[int | None, dict]]:
@@ -44,11 +51,11 @@ def meta_line(guide: dict) -> str:
     S = guide.get("settings") or {}
     parts = [guide["meta_count"]] if guide.get("meta_count") else []  # a page counts guides
     if S.get("step_count"):
-        parts.append(f"{sum(1 for n, _ in numbered(guide) if n)} ขั้นตอน")
-    if S.get("created") and thai_date(guide.get("created", "")):
-        parts.append("สร้างเมื่อ " + thai_date(guide["created"]))
-    if S.get("updated") and thai_date(guide.get("updated", "")):
-        parts.append("แก้ไขล่าสุด " + thai_date(guide["updated"]))
+        parts.append(tr("{n} ขั้นตอน", n=sum(1 for n, _ in numbered(guide) if n)))
+    if S.get("created") and doc_date(guide.get("created", "")):
+        parts.append(tr("สร้างเมื่อ {d}", d=doc_date(guide["created"])))
+    if S.get("updated") and doc_date(guide.get("updated", "")):
+        parts.append(tr("แก้ไขล่าสุด {d}", d=doc_date(guide["updated"])))
     return " · ".join(parts)
 
 
@@ -96,11 +103,11 @@ def build_markdown(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
         lines += [md_escape(guide["description"]), ""]
     toc = (guide.get("settings") or {}).get("toc")
     if toc and secs:  # a page: its guides and text blocks
-        lines += ["**สารบัญ**", ""]
+        lines += ["**" + tr("สารบัญ") + "**", ""]
         lines += [f"1. [{_one_line(s.get('text'))}](#a{i})" for i, s in enumerate(secs) if s.get("text")]
         lines.append("")
     elif toc and any(n for n, _ in steps):
-        lines += ["**สารบัญ**", ""]
+        lines += ["**" + tr("สารบัญ") + "**", ""]
         lines += [f"{n}. [{_one_line(s.get('text'))}](#step-{n})" for n, s in steps if n]
         lines.append("")
     files, sec = {}, -1
@@ -198,8 +205,9 @@ def _template_leftovers(doc) -> None:
             rel.target_part._blob = _APP_XML
 
 
-def _thai_lang(doc) -> None:
-    """Document language Thai, so Word spell-checks Thai text as Thai."""
+def _doc_lang(doc) -> None:
+    """Document language: Latin text in the app's language (en-US / th-TH),
+    complex-script text Thai, so Word spell-checks each as what it is."""
     from docx.oxml.ns import qn
     rpr = doc.styles.element.find(qn("w:docDefaults")).find(qn("w:rPrDefault")).find(qn("w:rPr"))
     lang = rpr.find(qn("w:lang"))
@@ -207,7 +215,7 @@ def _thai_lang(doc) -> None:
         lang = rpr.makeelement(qn("w:lang"), {})
         rpr.append(lang)
     for a in ("val", "bidi", "eastAsia"):
-        lang.set(qn("w:" + a), "th-TH")
+        lang.set(qn("w:" + a), "en-US" if a == "val" and i18n.LANG == "en" else "th-TH")
 
 
 def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
@@ -217,7 +225,7 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     from PIL import Image
     doc = docx.Document()
     _template_leftovers(doc)
-    _thai_lang(doc)
+    _doc_lang(doc)
     cp = doc.core_properties  # the template says "python-docx", 2013: guide's own instead
     cp.title, cp.author, cp.comments, cp.last_modified_by = guide.get("title", ""), "", "", ""
     for k in ("created", "modified"):
@@ -242,7 +250,7 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     if guide.get("description"):  # a page's
         doc.add_paragraph(guide["description"])
     if (guide.get("settings") or {}).get("toc") and (secs or any(n for n, _ in steps)):
-        _run(doc.add_paragraph(), "สารบัญ", bold=True)
+        _run(doc.add_paragraph(), tr("สารบัญ"), bold=True)
         for n, s in steps:
             if (s.get("kind") == "section" and s.get("text")) if secs else n:
                 doc.add_paragraph(s.get("text") or "", style="List Number")

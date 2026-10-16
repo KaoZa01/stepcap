@@ -5,7 +5,7 @@ from io import BytesIO
 
 from PIL import Image
 
-from exporters import build_markdown, md_escape, meta_line, thai_date
+from exporters import build_markdown, doc_date, md_escape, meta_line
 
 
 def _png(color=(0, 200, 0)) -> bytes:
@@ -27,9 +27,9 @@ def _zip(b: bytes) -> dict:
         return {n: z.read(n) for n in z.namelist()}
 
 
-def test_thai_date():
-    assert thai_date("2026-10-16T10:00:00") == "16 ต.ค. 2569"
-    assert thai_date("x") == ""
+def test_doc_date():
+    assert doc_date("2026-10-16T10:00:00") == "16 ต.ค. 2569"
+    assert doc_date("x") == ""
 
 
 def test_meta_line():
@@ -155,6 +155,21 @@ def test_docx_no_template_leftovers():
     assert str(d.styles["Heading 1"].font.color.rgb) == "111827"
 
 
+def test_english_export_labels():
+    import i18n
+    from exporters import build_docx, doc_date
+    g = {**G, "settings": {**G["settings"], "updated": True}}
+    with i18n.using("en"):
+        assert doc_date("2026-10-16T10:00:00") == "16 Oct 2026"
+        assert meta_line(g) == "2 steps · Created 16 Oct 2026 · Last edited 16 Oct 2026"
+        md = _zip(build_markdown(g, {}))
+        assert "**Contents**" in next(v for k, v in md.items() if k.endswith(".md")).decode("utf-8")
+        b = build_docx(g, {})
+    assert "Contents" in [p.text for p in _doc(b).paragraphs]
+    styles = _zip(b)["word/styles.xml"]
+    assert b'w:val="en-US"' in styles and b'w:bidi="th-TH"' in styles
+
+
 def _doc(b: bytes):
     import docx
     return docx.Document(BytesIO(b))
@@ -251,6 +266,22 @@ def test_safe_title_windows_names():
     assert safe_title("a\x07b. . ") == "a_b" and safe_title("...") == "guide"
 
 
+def test_tray_menu_follows_language():
+    # Settings switches the language while the tray icon lives on: every label
+    # in its menu, the screen list too, is worked out when the menu opens
+    import types
+    import i18n
+    app = _app()
+    rec = types.SimpleNamespace(recording=False, paused=False, selected=0, monitors=[
+        {"index": 0, "left": 0, "top": 0, "right": 1920, "bottom": 1080, "primary": True}])
+    tray = app.Tray(rec)
+    screens = lambda: [it.text for it in tray.icon.menu.items[1].submenu.items]
+    assert screens() == ["จอ 1 (1920×1080) หลัก"], screens()
+    with i18n.using("en"):
+        assert screens() == ["Screen 1 (1920×1080) · main"], screens()
+        assert tray.icon.menu.items[1].text == "Choose screen" and tray._title() == "StepCap - Idle"
+
+
 def test_export_write_error_reported():
     # Save As picked a place that can't be written: say so, don't pretend it saved
     import json
@@ -262,9 +293,9 @@ def test_export_write_error_reported():
     bad = str(st / "no" / "such" / "x.html")
     app.WINDOW = type("W", (), {"create_file_dialog": lambda self, *a, **k: (bad,)})()
     for fmt, body in (("html", b"<html></html>"), ("md", b'{"images": []}\n')):
-        assert app.export_guide("g1", fmt, body) == app.SAVE_FAILED
-    assert app.download_image("g1", "1", "png", PNG) == app.SAVE_FAILED
-    assert app.SAVE_FAILED["error"].startswith("บันทึกไฟล์ไม่ได้")
+        assert app.export_guide("g1", fmt, body) == app.save_failed()
+    assert app.download_image("g1", "1", "png", PNG) == app.save_failed()
+    assert app.save_failed()["error"].startswith("บันทึกไฟล์ไม่ได้")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 บันทึกการคลิกและการพิมพ์บนหน้าจอให้เป็นคู่มือทีละขั้นตอนพร้อมภาพ แล้วส่งออกเป็น Word, PDF, HTML หรือ Markdown
 เหมาะกับการทำ SOP และคู่มือสอนใช้งานโปรแกรมให้เพื่อนร่วมงาน ทุกอย่างทำงานในเครื่อง ไม่ส่งข้อมูลออกไปที่ไหน
 
-*StepCap turns your clicks and typing into a step-by-step guide with screenshots, exported as Word, PDF, HTML or Markdown. Windows only, runs fully offline.*
+*StepCap turns your clicks and typing into a step-by-step guide with screenshots, exported as Word, PDF, HTML or Markdown. Windows only, runs fully offline. The app speaks Thai or English: Settings > ภาษา / Language.*
 
 ## ทำอะไรได้บ้าง
 
@@ -44,6 +44,8 @@ python -m venv .venv
 4. กด **ส่งออก** แล้วเลือกรูปแบบไฟล์
 
 เปิดครั้งแรกจะมีคู่มือ "ตัวอย่าง: เริ่มต้นใช้ StepCap" อยู่ในคลัง และมีคำแนะนำสั้น ๆ ชี้ปุ่มสำคัญ ดูคำแนะนำซ้ำได้ที่ **ตั้งค่า > แสดงคำแนะนำอีกครั้ง**
+
+เปลี่ยนภาษาเป็นภาษาอังกฤษได้ที่ **ตั้งค่า > ภาษา / Language** ข้อความขั้นตอนที่บันทึกใหม่และหัวข้อในไฟล์ที่ส่งออกจะเป็นภาษาที่เลือก ส่วนคู่มือที่ทำไว้แล้วไม่ถูกแปล
 
 | ปุ่มลัด | ใช้ทำอะไร |
 |---|---|
