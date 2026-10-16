@@ -350,13 +350,20 @@ def _export_to(route: str, body: bytes, target: Path, ext: str) -> dict:
 
 def test_export_pdf():
     png = base64.b64encode(_img("PNG")).decode()
-    html = (f'<!doctype html><html lang="th"><meta charset="utf-8"><body><h1>คู่มือทดสอบ</h1>'
+    # empty <title> + an in-page link: neither may drag the temp file's path in
+    html = (f'<!doctype html><html lang="th"><head><meta charset="utf-8"><title></title></head>'
+            f'<body><a href="#s1">สารบัญ</a><h1 id="s1">คู่มือทดสอบ</h1>'
             f'<img src="data:image/png;base64,{png}"></body></html>').encode("utf-8")
     target = CTX["storage"] / "x.pdf"
     r = _export_to("export?format=pdf", html, target, ".pdf")
     assert Path(r["saved"]).resolve() == target.resolve(), r
     data = target.read_bytes()
     assert data.startswith(b"%PDF") and b"/Type /Page" in data
+    low = data.lower()
+    for needle in ("file:", CTX["storage"].name, "print-"):
+        for enc in (needle.encode(), needle.encode("utf-16-be"),
+                    needle.encode().hex().encode(), needle.encode("utf-16-be").hex().encode()):
+            assert enc.lower() not in low, (needle, enc)
     tmp = CTX["storage"] / "_tmp"
     assert not list(tmp.glob("print-*")), list(tmp.glob("print-*"))
 
@@ -365,8 +372,8 @@ def test_export_md_and_docx():
     import zipfile
     from io import BytesIO
     png = _img("PNG")
-    body = json.dumps({"images": {"s1": {"ext": "png",
-                                         "data": base64.b64encode(png).decode()}}}).encode()
+    body = json.dumps({"images": [{"id": "s1", "ext": "png", "size": len(png)}]}).encode() \
+        + b"\n" + png
     z = CTX["storage"] / "x.zip"
     r = _export_to("export?format=md", body, z, ".zip")
     assert Path(r["saved"]).resolve() == z.resolve(), r

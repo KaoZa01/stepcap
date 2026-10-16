@@ -19,6 +19,7 @@ import threading
 import urllib.request
 from ctypes import wintypes
 from functools import partial
+from io import BytesIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -524,36 +525,65 @@ def export_guide(gid: str, fmt: str, body: bytes) -> dict:
             data = print_pdf(body.decode("utf-8"))
         else:
             guide = library.read_guide(STORAGE / gid)
-            images = _export_images(gid, guide, _obj(body) or {})
+            images, missing = _export_images(gid, guide, body)
             data = (exporters.build_markdown if fmt == "md" else exporters.build_docx)(guide, images)
     except Exception:
         return {"saved": None, "error": "สร้าง PDF ไม่สำเร็จ" if fmt == "pdf" else "สร้างไฟล์ไม่สำเร็จ"}
     try:
-        return {"saved": save_as(f"{title}.{ext}", data, filt)}
+        out = {"saved": save_as(f"{title}.{ext}", data, filt)}
     except OSError:
         return dict(SAVE_FAILED)
+    if fmt in ("md", "docx") and missing:
+        out["missing"] = missing  # exported without these pictures; the page says so
+    return out
 
 
-def _export_images(gid: str, guide: dict, body: dict) -> dict[str, tuple[str, bytes]]:
-    """Step id -> (ext, bytes). PNGs are the page's finished (redacted) pictures;
-    a GIF is read from the guide folder, never taken from the request."""
-    import base64
-    sent = body.get("images") if isinstance(body.get("images"), dict) else {}
-    out = {}
-    for s in guide["steps"]:
-        item, image = sent.get(s.get("id")), s.get("image") or ""
-        if not isinstance(item, dict):
+def _export_images(gid: str, guide: dict, body: bytes) -> tuple[dict, list[int]]:
+    """The page's finished pictures for md/docx -> ({step id: (ext, bytes)},
+    step numbers whose picture is unusable). body = one JSON line
+    {"images": [{"id", "ext": "png", "size"} | {"id", "ext": "gif"}]} then the
+    PNG bytes back to back -- binary, so a big guide never becomes one giant
+    base64 string. A GIF is read from the guide folder, never from the request."""
+    head, _, rest = body.partition(b"\n")
+    try:
+        index = json.loads(head)["images"]
+        assert isinstance(index, list)
+    except Exception:
+        index = []
+    nums = {s["id"]: n for n, s in exporters.numbered(guide) if n}
+    steps = {s["id"]: s for s in guide["steps"]}
+    out, missing, pos = {}, [], 0
+    for it in index:
+        if not isinstance(it, dict) or it.get("id") not in nums:
             continue
-        if item.get("ext") == "gif":
+        sid, data = it["id"], None
+        if it.get("ext") == "gif":
+            image = steps[sid].get("image") or ""
             f = STORAGE / gid / image
             if image.lower().endswith(".gif") and library.safe_name(image) \
                     and f.parent == STORAGE / gid and f.is_file():
-                out[s["id"]] = ("gif", f.read_bytes())
-        elif isinstance(item.get("data"), str):
-            data = base64.b64decode(item["data"])
-            if library.image_kind(data) == "png":
-                out[s["id"]] = ("png", data)
-    return out
+                data = f.read_bytes()
+            ext = "gif"
+        else:
+            size = it.get("size") if isinstance(it.get("size"), int) else -1
+            data = rest[pos:pos + size] if 0 <= size <= len(rest) - pos else None
+            pos += max(size, 0)
+            ext = "png"
+        if data and library.image_kind(data) == ext and _decodes(data):
+            out[sid] = (ext, data)
+        else:
+            missing.append(nums[sid])
+    return out, sorted(missing)
+
+
+def _decodes(data: bytes) -> bool:
+    from PIL import Image
+    try:
+        with Image.open(BytesIO(data)) as im:
+            im.load()
+        return True
+    except Exception:
+        return False
 
 
 def print_pdf(html: str) -> bytes:
@@ -566,7 +596,9 @@ def print_pdf(html: str) -> bytes:
     src.write_text(html, encoding="utf-8")
     win = None
     try:
-        win = webview.create_window("StepCap print", url=src.as_uri(), hidden=True)
+        # focus=False: never activates, so the hidden window can't take focus
+        # or flash a taskbar button while pywebview shows-then-hides it
+        win = webview.create_window("StepCap print", url=src.as_uri(), hidden=True, focus=False)
         if not win.events.loaded.wait(30):
             raise RuntimeError("print page did not load")
         end = time.time() + 30
@@ -574,6 +606,8 @@ def print_pdf(html: str) -> bytes:
             if time.time() > end:
                 raise RuntimeError("print images did not load")
             time.sleep(0.1)
+        # an empty title would make WebView2 title the PDF with our temp file name
+        win.evaluate_js("document.title.trim() || (document.title = 'StepCap'); 1")
         from System import Action
         from System.Threading.Tasks import Task
         done, res = threading.Event(), {}

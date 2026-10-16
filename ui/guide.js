@@ -191,6 +191,9 @@ function renderStepPng(step, gid) {
 // One self-contained HTML file that looks like view mode. Every non-GIF image
 // is flattened first, so no original screenshot ever leaves the machine.
 // print: the PDF source -- pictures as <img> (print waits for them) and A4 CSS.
+// ponytail: one string with data URLs; past ~400 MB of pictures the JS string
+// limit throws and the export says it failed. Ship pictures as files if a
+// guide ever gets that big (Markdown/Word already send raw blobs).
 async function buildExportHtml(gid, {print = false, failed = []} = {}) {
   const g = await getJSON("/api/guide/" + encodeURIComponent(gid));
   const steps = [];
@@ -200,8 +203,9 @@ async function buildExportHtml(gid, {print = false, failed = []} = {}) {
     if (s.kind !== "note") n++;
     try {
       if (s.image && isGif(s)) {
-        c._src = await asDataUrl(await (await api("/img/" + encodeURIComponent(gid) +
-          "/" + encodeURIComponent(s.image))).blob());
+        const res = await api("/img/" + encodeURIComponent(gid) + "/" + encodeURIComponent(s.image));
+        if (!res.ok) throw new Error("gif " + res.status);  // gone: say so, don't embed the 404 text
+        c._src = await asDataUrl(await res.blob());
         c._gif = true;
       } else if (s.image) {
         c._src = await asDataUrl(await renderStepPng(s, gid));
@@ -232,21 +236,23 @@ const PRINT_CSS = "@page{size:A4;margin:14mm}body{padding:0}" +
 
 // Finished pictures for Markdown and Word: every PNG comes from renderStepPng,
 // so hidden parts are really gone; a GIF is only flagged (the server reads it
-// from the guide folder). failed: step numbers whose picture couldn't be drawn.
+// from the guide folder). Sent as raw blobs after a JSON index -- never one
+// giant base64 string. failed: step numbers whose picture couldn't be drawn.
 async function exportImages(g, gid) {
-  const images = {}, failed = [];
+  const index = [], blobs = [], failed = [];
   let n = 0;
   for (const s of g.steps) {
     if (s.kind === "note") continue;
     n++;
     if (!s.image) continue;
-    if (isGif(s)) { images[s.id] = {ext: "gif"}; continue; }
+    if (isGif(s)) { index.push({id: s.id, ext: "gif"}); continue; }
     try {
-      const url = await asDataUrl(await renderStepPng(s, gid));
-      images[s.id] = {ext: "png", data: url.slice(url.indexOf(",") + 1)};
+      const b = await renderStepPng(s, gid);
+      index.push({id: s.id, ext: "png", size: b.size});
+      blobs.push(b);
     } catch { failed.push(n); }
   }
-  return {images, failed};
+  return {index, blobs, failed};
 }
 
 const EXPORT_FORMATS = [["html", "HTML"], ["pdf", "PDF"], ["md", "Markdown (.zip)"], ["docx", "Word (.docx)"]];
@@ -259,7 +265,7 @@ let EXPORTING = false;
 async function exportGuide(gid, format = "html") {
   if (EXPORTING) return;
   EXPORTING = true;
-  toast("กำลังส่งออก…");
+  toast("กำลังส่งออก…", 3600000);  // stays until the result replaces it
   const failed = [];
   let r;
   try {
@@ -269,8 +275,8 @@ async function exportGuide(gid, format = "html") {
     } else {
       const x = await exportImages(await getJSON("/api/guide/" + encodeURIComponent(gid)), gid);
       failed.push(...x.failed);
-      body = JSON.stringify({images: x.images});
-      type = "application/json";
+      body = new Blob([JSON.stringify({images: x.index}) + "\n", ...x.blobs]);
+      type = "application/octet-stream";
     }
     const res = await api("/api/guide/" + encodeURIComponent(gid) + "/export?format=" + format,
       {method: "POST", headers: {"Content-Type": type}, body});
@@ -283,6 +289,8 @@ async function exportGuide(gid, format = "html") {
   document.querySelectorAll(".toast").forEach(t => t.remove());
   if (r.error) return toast("ส่งออกไม่สำเร็จ: " + r.error, 6000);
   if (!r.saved) return;  // cancelled
+  failed.push(...(r.missing || []));  // pictures the server couldn't use (e.g. a GIF gone)
+  failed.sort((a, b) => a - b);
   toast(failed.length ? `บันทึกไฟล์แล้ว แต่ภาพของขั้นที่ ${failed.join(", ")} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ`
     : "บันทึกไฟล์แล้ว", failed.length ? 8000 : 2500);
 }

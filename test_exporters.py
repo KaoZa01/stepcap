@@ -94,6 +94,16 @@ def test_docx_thai_font():
     assert rf.get(qn("w:cs")) == "Leelawadee UI" and rf.get(qn("w:ascii")) == "Leelawadee UI"
 
 
+def test_docx_thai_bold_italic():
+    # Word styles Thai as complex script: bold/italic need bCs/iCs, not just b/i
+    from docx.oxml.ns import qn
+    from exporters import build_docx
+    runs = {r.text: r._r.find(qn("w:rPr")) for p in _doc(build_docx(G, {})).paragraphs for r in p.runs}
+    for t in ("1. คลิก *บันทึก*", "สารบัญ"):
+        assert runs[t].find(qn("w:bCs")) is not None, t
+    assert runs["ระวัง"].find(qn("w:iCs")) is not None
+
+
 def test_docx_gif_first_frame():
     from exporters import build_docx
     frames = [Image.new("RGB", (8, 8), c) for c in ((255, 0, 0), (0, 0, 255))]
@@ -112,22 +122,48 @@ def test_docx_notes_only():
     assert len(d.inline_shapes) == 0 and "ระวัง" in [p.text for p in d.paragraphs]
 
 
-def test_export_write_error_reported():
-    # Save As picked a place that can't be written: say so, don't pretend it saved
-    import json
+def _app():
+    """app.py in this process on its own temp storage (never the real one)."""
     import os
     import tempfile
     from pathlib import Path
-    st = Path(tempfile.mkdtemp(prefix="stepcap-exp-"))
-    os.environ["STEPCAP_STORAGE"] = str(st)
+    if "app" not in sys.modules:
+        os.environ["STEPCAP_STORAGE"] = tempfile.mkdtemp(prefix="stepcap-exp-")
     import app
-    assert app.STORAGE == st
+    assert str(app.STORAGE) == os.environ["STEPCAP_STORAGE"]
+    return app
+
+
+def test_export_images_binary_and_missing():
+    import json
+    app = _app()
+    st = app.STORAGE
+    (st / "g2").mkdir()
+    (st / "g2" / "bad.gif").write_bytes(b"GIF89a junk")
+    guide = {"id": "g2", "steps": [
+        {"id": "s1", "kind": "click", "text": "a", "image": "a.png"},
+        {"id": "n", "kind": "note", "text": "x"},
+        {"id": "s2", "kind": "image", "text": "b", "image": "gone.gif"},
+        {"id": "s3", "kind": "image", "text": "c", "image": "bad.gif"}]}
+    head = json.dumps({"images": [{"id": "s1", "ext": "png", "size": len(PNG)},
+                                  {"id": "s2", "ext": "gif"}, {"id": "s3", "ext": "gif"}]})
+    images, missing = app._export_images("g2", guide, head.encode() + b"\n" + PNG)
+    assert images == {"s1": ("png", PNG)} and missing == [2, 3], (images, missing)
+    images, missing = app._export_images("g2", guide, head.encode() + b"\n" + PNG[:10])
+    assert images == {} and missing == [1, 2, 3], (images, missing)  # cut-off body
+
+
+def test_export_write_error_reported():
+    # Save As picked a place that can't be written: say so, don't pretend it saved
+    import json
+    app = _app()
+    st = app.STORAGE
     (st / "g1").mkdir()
     (st / "g1" / "guide.json").write_text(json.dumps(
         {"id": "g1", "title": "t", "created": "2026-10-16T10:00:00", "steps": []}), encoding="utf-8")
     bad = str(st / "no" / "such" / "x.html")
     app.WINDOW = type("W", (), {"create_file_dialog": lambda self, *a, **k: (bad,)})()
-    for fmt, body in (("html", b"<html></html>"), ("md", b'{"images": {}}')):
+    for fmt, body in (("html", b"<html></html>"), ("md", b'{"images": []}\n')):
         assert app.export_guide("g1", fmt, body) == {"saved": None, "error": "บันทึกไฟล์ไม่ได้"}
     assert app.download_image("g1", "1", "png", PNG) == {"saved": None, "error": "บันทึกไฟล์ไม่ได้"}
 

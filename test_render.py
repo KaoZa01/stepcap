@@ -91,6 +91,8 @@ def seed(st: Path):
          "crop": None, "markers": []},
         {"id": "b2", "kind": "click", "text": "junk", "image": "bad.png",
          "crop": None, "markers": []},
+        {"id": "b3", "kind": "image", "text": "gif gone", "image": "gone.gif",
+         "crop": None, "markers": []},
     ])
     (st / "broken" / "bad.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"junk" * 50)
     _guide(st, "cropx", [
@@ -217,16 +219,25 @@ def test_print_html_uses_img():
 
 
 def test_export_images_no_original():
-    r = js("const g = await getJSON('/api/guide/noise'); return await exportImages(g, 'noise');")
-    assert r["failed"] == [] and r["images"]["a3"] == {"ext": "gif"}, r["failed"]
-    b64 = r["images"]["a1"]["data"]
+    r = js("const g = await getJSON('/api/guide/noise'); const x = await exportImages(g, 'noise');"
+           "return {index: x.index, failed: x.failed, png: await __b64(x.blobs[0])};")
+    assert r["failed"] == [] and {"id": "a3", "ext": "gif"} in r["index"], r["index"]
+    a1 = next(i for i in r["index"] if i["id"] == "a1")
+    b64 = r["png"]
+    assert a1["ext"] == "png" and a1["size"] == len(base64.b64decode(b64))
     assert base64.b64encode(NOISE_PNG).decode()[1000:1200] not in b64
     assert _black(png(b64), range(20, 80), range(20, 60))
 
 
 def test_export_images_skip_broken():
-    r = js("const g = await getJSON('/api/guide/broken'); return await exportImages(g, 'broken');")
-    assert r == {"images": {}, "failed": [1, 2]}, r
+    r = js("const g = await getJSON('/api/guide/broken'); const x = await exportImages(g, 'broken');"
+           "return {index: x.index, failed: x.failed, blobs: x.blobs.length};")
+    # the GIF is only flagged: the server reads it and reports it missing
+    assert r == {"index": [{"id": "b3", "ext": "gif"}], "failed": [1, 2], "blobs": 0}, r
+
+
+def test_html_export_names_missing_gif():
+    assert js("const f = []; await buildExportHtml('broken', {failed: f}); return f;") == [1, 2, 3]
 
 
 def test_bake_redaction_across_crop():
@@ -284,10 +295,10 @@ def test_image_paste_adds_step():
 def test_broken_image_tolerated():
     page("guide=broken&mode=edit")
     time.sleep(1)
-    assert js("return document.querySelectorAll('.step').length;") == 2
-    assert js("return document.querySelectorAll('.imgfail').length;") == 2
+    assert js("return document.querySelectorAll('.step').length;") == 3
+    assert js("return document.querySelectorAll('.imgfail').length;") == 3
     js("STATE.steps.splice(0, 1); renderSteps();")
-    assert js("return document.querySelectorAll('.step').length;") == 1
+    assert js("return document.querySelectorAll('.step').length;") == 2
 
 
 _OPEN = ("openImageEditor(STATE.steps[0].id); await IED.ready;")
@@ -545,6 +556,7 @@ def test_pasted_image_redacted():
 
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
          test_export_images_no_original, test_export_images_skip_broken,
+         test_html_export_names_missing_gif,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
          test_image_paste_adds_step, test_broken_image_tolerated,

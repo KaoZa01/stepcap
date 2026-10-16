@@ -123,6 +123,20 @@ def _png_bytes(ext: str, data: bytes) -> bytes:
         return out.getvalue()
 
 
+def _run(p, text: str, bold=False, italic=False):
+    """A run whose bold/italic also reach Thai, which Word styles as complex
+    script (bCs/iCs); plain b/i would leave the Thai part regular."""
+    r = p.add_run(text)
+    rpr = r._r.get_or_add_rPr()
+    if bold:
+        r.bold = True
+        rpr.get_or_add_bCs()
+    if italic:
+        r.italic = True
+        rpr.get_or_add_iCs()
+    return r
+
+
 def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     import docx
     from docx.oxml.ns import qn
@@ -141,19 +155,19 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     if meta:
         doc.add_paragraph(meta)
     if (guide.get("settings") or {}).get("toc") and any(n for n, _ in steps):
-        doc.add_paragraph().add_run("สารบัญ").bold = True
+        _run(doc.add_paragraph(), "สารบัญ", bold=True)
         for n, s in steps:
             if n:
                 doc.add_paragraph(s.get("text", ""), style="List Number")
     for n, s in steps:
         if n is None:
             p = doc.add_paragraph()
-            p.add_run(s.get("text", "")).italic = True
+            _run(p, s.get("text") or "", italic=True)
             shd = p._p.get_or_add_pPr().makeelement(
                 qn("w:shd"), {qn("w:val"): "clear", qn("w:fill"): "F3F4F6"})
             p._p.get_or_add_pPr().append(shd)
             continue
-        doc.add_paragraph().add_run(f"{n}. {s.get('text', '')}").bold = True
+        _run(doc.add_paragraph(), f"{n}. {s.get('text') or ''}", bold=True)
         if s.get("id") in images:
             png = _png_bytes(*images[s["id"]])
             with Image.open(BytesIO(png)) as im:
