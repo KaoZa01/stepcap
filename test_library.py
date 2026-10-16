@@ -83,7 +83,7 @@ def test_wrong_shape_guide_skipped():
         _seed(st, "e", created=5)
         _seed(st, "f", steps=[{"id": "s1", "kind": "click", "text": 5}])
         _seed(st, "g", settings=[1])
-        assert [s["id"] for s in list_guides(st)] == ["a"]
+        assert [s["id"] for s in list_guides(st) if not s.get("broken")] == ["a"]
         assert [s["id"] for s in list_guides(st, q="x")] == ["a"]
         trash_guide(st, "b")
         assert [t["id"] for t in list_trash(st)] == ["b"]  # listed by folder name
@@ -129,7 +129,7 @@ def test_wrong_shape_layers_skipped():
         _seed(st, "b", steps=[{"id": "s", "kind": "click", "text": "", "markers": "x"}])
         _seed(st, "c", steps=[{"id": "s", "kind": "click", "text": "", "annotations": [1]}])
         _seed(st, "d", steps=[{"id": "s", "kind": "click", "text": "", "redactions": {"x": 1}}])
-        assert [s["id"] for s in list_guides(st)] == ["a"]
+        assert [s["id"] for s in list_guides(st) if not s.get("broken")] == ["a"]
 
 
 def test_image_kind():
@@ -168,8 +168,25 @@ def test_corrupt_guide_skipped():
         (st / "_tmp").mkdir()
         _seed(st, "_trash")  # a system folder that happens to hold a guide.json
         (st / "stray.txt").write_text("x", encoding="utf-8")
-        assert [s["id"] for s in list_guides(st)] == ["a"]
+        (st / "c").mkdir()  # being recorded: no guide.json yet
+        got = list_guides(st)
+        assert [(s["id"], s.get("broken", False)) for s in got] == [("a", False), ("b", True)], got
+        assert list_guides(st, q="zzz") == []  # searches skip it
         assert (st / "b" / "guide.json").exists()
+
+
+def test_update_meta_write_failure():
+    import stat
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1")
+        f = st / "g1" / "guide.json"
+        f.chmod(stat.S_IREAD)
+        try:
+            assert update_meta(st, "g1", title="ใหม่") is False
+            assert update_meta(st, "g1", bookmarked=True) is False
+        finally:
+            f.chmod(stat.S_IWRITE | stat.S_IREAD)
 
 
 def test_list_search_and_order():

@@ -1,7 +1,8 @@
-comtypes
-Pillow
-pystray
-pywebview
+comtypes==1.4.17
+Pillow==12.3.0
+pystray==0.19.5
+pywebview==6.2.1
+pythonnet==3.2.1
 winrt-runtime==3.2.1
 winrt-Windows.Foundation==3.2.1
 winrt-Windows.Foundation.Collections==3.2.1

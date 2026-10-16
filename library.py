@@ -180,7 +180,16 @@ def list_guides(storage: Path, q: str = "", bookmarked_only: bool = False,
         if not folder.is_dir() or not safe_id(folder.name):
             continue
         g = read_guide(folder)
-        if g is None or (bookmarked_only and not g["bookmarked"]):
+        if g is None:
+            # a guide.json that can't be read is listed, not hidden: the user
+            # must see their guide is there but damaged (a folder being
+            # recorded has no guide.json yet and stays out)
+            if not q and not bookmarked_only and (folder / "guide.json").is_file():
+                out.append({"id": folder.name, "title": folder.name, "created": "",
+                            "updated": "", "count": 0, "app": "", "icon": False,
+                            "bookmarked": False, "ago": "", "broken": True})
+            continue
+        if bookmarked_only and not g["bookmarked"]:
             continue
         if q and not _matches(g, q):
             continue
@@ -225,7 +234,10 @@ def update_meta(storage: Path, gid: str, title: str | None = None,
         g["updated"] = now_iso()
     if bookmarked is not None:
         g["bookmarked"] = bool(bookmarked)
-    write_json_atomic(folder / "guide.json", g)
+    try:
+        write_json_atomic(folder / "guide.json", g)
+    except OSError:  # read-only, held open, disk full: the page says it failed
+        return False
     return True
 
 

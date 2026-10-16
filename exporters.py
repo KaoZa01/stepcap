@@ -179,12 +179,45 @@ def _run(p, text: str, bold=False, italic=False):
     return r
 
 
+_APP_XML = (b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            b'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
+            b'<Application>StepCap</Application></Properties>')
+INK = (0x11, 0x18, 0x27)  # DESIGN.md --ink
+
+
+def _template_leftovers(doc) -> None:
+    """The python-docx template ships a blank page thumbnail and app.xml naming
+    "Microsoft Macintosh Word"; the file should say StepCap and show no fake
+    preview."""
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    pkg = doc.part.package
+    for rid, rel in list(pkg.rels.items()):
+        if rel.reltype == RT.THUMBNAIL:
+            del pkg.rels[rid]
+        elif rel.reltype == RT.EXTENDED_PROPERTIES:
+            rel.target_part._blob = _APP_XML
+
+
+def _thai_lang(doc) -> None:
+    """Document language Thai, so Word spell-checks Thai text as Thai."""
+    from docx.oxml.ns import qn
+    rpr = doc.styles.element.find(qn("w:docDefaults")).find(qn("w:rPrDefault")).find(qn("w:rPr"))
+    lang = rpr.find(qn("w:lang"))
+    if lang is None:
+        lang = rpr.makeelement(qn("w:lang"), {})
+        rpr.append(lang)
+    for a in ("val", "bidi", "eastAsia"):
+        lang.set(qn("w:" + a), "th-TH")
+
+
 def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     import docx
     from docx.oxml.ns import qn
-    from docx.shared import Emu, Inches, Mm
+    from docx.shared import Emu, Inches, Mm, RGBColor
     from PIL import Image
     doc = docx.Document()
+    _template_leftovers(doc)
+    _thai_lang(doc)
     cp = doc.core_properties  # the template says "python-docx", 2013: guide's own instead
     cp.title, cp.author, cp.comments, cp.last_modified_by = guide.get("title", ""), "", "", ""
     for k in ("created", "modified"):
@@ -192,8 +225,10 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
             setattr(cp, k, datetime.fromisoformat(guide.get(k if k == "created" else "updated", "")))
         except (TypeError, ValueError):
             pass
-    for name in ("Normal", "Title", "List Number", "Heading 1"):
+    for name in ("Normal", "Title", "List Number", "Heading 1", "Heading 2"):
         _thai_font(doc.styles[name])
+    for name in ("Title", "Heading 1", "Heading 2"):  # the template's blue -> the app's ink
+        doc.styles[name].font.color.rgb = RGBColor(*INK)
     sec = doc.sections[0]
     sec.page_width, sec.page_height = Mm(210), Mm(297)  # A4
     text_w = sec.page_width - sec.left_margin - sec.right_margin
@@ -225,7 +260,8 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
                 qn("w:shd"), {qn("w:val"): "clear", qn("w:fill"): "F3F4F6"})
             p._p.get_or_add_pPr().append(shd)
             continue
-        _run(doc.add_paragraph(), f"{n}. {s.get('text') or ''}", bold=True)
+        # a heading, so steps show in Word's Navigation Pane
+        _run(doc.add_paragraph(style="Heading 2"), f"{n}. {s.get('text') or ''}", bold=True)
         if s.get("id") in images:
             png = _png_bytes(*images[s["id"]])
             with Image.open(BytesIO(png)) as im:

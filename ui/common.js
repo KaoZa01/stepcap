@@ -11,7 +11,29 @@ const post = (path, body) => api(path, {
   method: "POST", headers: {"Content-Type": "application/json"},
   body: body === undefined ? "{}" : (typeof body === "string" ? body : JSON.stringify(body)),
 });
-const getJSON = async path => (await api(path)).json();
+const getJSON = async path => {
+  const r = await api(path);
+  if (!r.ok) throw new Error(path + " " + r.status);
+  return r.json();
+};
+// true when the server took it; a dropped connection or an error status is false
+const postOk = async (path, body) => { try { return (await post(path, body)).ok; } catch { return false; } };
+// Runs fn with the button disabled, so a second click can't start it twice.
+async function busy(btn, fn) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try { return await fn(); } finally { if (btn.isConnected) btn.disabled = false; }
+}
+// A div that opens something on click also opens with Enter / Space from the keyboard.
+function activatable(el, run, label) {
+  el.tabIndex = 0;
+  el.setAttribute("role", "button");
+  if (label) el.setAttribute("aria-label", label);
+  el.addEventListener("click", e => { if (!e.target.closest("button, a, input")) run(); });
+  el.addEventListener("keydown", e => {
+    if (e.target === el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); run(); }
+  });
+}
 const esc = s => (s == null ? "" : String(s)).replace(/[&<>"']/g,
   c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const imgUrl = (gid, file) => "/img/" + encodeURIComponent(gid) + "/" +
@@ -46,22 +68,27 @@ const ICON = {
   restore: _svg('<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>'),
   rec: _svg('<circle cx="12" cy="12" r="5" fill="currentColor"/>'),
   stop: _svg('<rect x="7" y="7" width="10" height="10" rx="1" fill="currentColor"/>'),
+  up: _svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>'),
+  down: _svg('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>'),
 };
 const LOGO = `<svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="#fb923c"/>` +
   `<circle cx="16" cy="16" r="7.5" fill="none" stroke="#fff" stroke-width="3.2"/></svg>`;
 
 // ---------------------------------------------------------------- navigation
+// msg: a toast for the next page (a page that couldn't open says why, there)
+const NAV_MSG = {guide: "เปิดคู่มือนี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว",
+                 page: "เปิด Page นี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว"};
 function nav(params) {
   location.search = "?" + new URLSearchParams({t: T, ...params}).toString();
 }
 function goGuide(id, mode) { nav({guide: id, mode: mode || "view"}); }
 
 // ---------------------------------------------------------------- dialogs
-function _dialog(inner, okLabel, okClass, onOpen) {
+function _dialog(inner, okLabel, okClass, onOpen, cancelLabel) {
   return new Promise(resolve => {
     const d = document.createElement("dialog");
     d.className = "ui-dlg";
-    d.innerHTML = inner + `<div class="dlg-b"><button type="button" class="btn cancel">ยกเลิก</button>` +
+    d.innerHTML = inner + `<div class="dlg-b"><button type="button" class="btn cancel">${esc(cancelLabel || "ยกเลิก")}</button>` +
       `<button type="button" class="btn ${okClass || "dark"} ok">${esc(okLabel || "ตกลง")}</button></div>`;
     document.body.appendChild(d);
     d.querySelector(".cancel").onclick = () => d.close("");
@@ -72,50 +99,104 @@ function _dialog(inner, okLabel, okClass, onOpen) {
   });
 }
 
+// A name that can't be blank: OK stays off, and says why, until there is text.
 async function uiPrompt(label, value) {
   const d = await _dialog(`<p class="dlg-t">${esc(label)}</p>` +
-    `<input class="dlg-in" type="text" value="${esc(value || "")}">`, "ตกลง", "dark", dlg => {
-    const input = dlg.querySelector("input");
+    `<input class="dlg-in" type="text" value="${esc(value || "")}" aria-describedby="dlghint">` +
+    `<div class="dlg-hint" id="dlghint" hidden>ต้องพิมพ์อย่างน้อย 1 ตัวอักษร</div>`, "ตกลง", "dark", dlg => {
+    const input = dlg.querySelector("input"), ok = dlg.querySelector(".ok"), hint = dlg.querySelector(".dlg-hint");
+    const check = () => { ok.disabled = !input.value.trim(); return !ok.disabled; };
+    input.oninput = () => { if (check()) hint.hidden = true; };
+    check();
     input.focus(); input.select();
-    input.addEventListener("keydown", e => { if (e.key === "Enter") dlg.close("ok"); });
+    input.addEventListener("keydown", e => {
+      if (e.key !== "Enter") return;
+      if (check()) dlg.close("ok"); else hint.hidden = false;
+    });
   });
   return d ? d.querySelector("input").value : null;
 }
 
-async function uiConfirm(message, okLabel) {
+async function uiConfirm(message, okLabel, cancelLabel) {
   return !!(await _dialog(`<p class="dlg-t">${esc(message)}</p>`, okLabel || "ตกลง",
-    okLabel ? "red" : "dark"));
+    okLabel ? "red" : "dark", null, cancelLabel));
 }
 
-function toast(text, ms = 2500) {
+// Leaving an edit page. When the latest edits can't be saved, say why and let
+// the user stay (saving keeps retrying) or leave without them.
+async function leaveEdit(flushFn, dropPending, to) {
+  if (await flushFn()) return to();
+  if (await uiConfirm("บันทึกการแก้ไขล่าสุดไม่ได้\nไฟล์อาจถูกโปรแกรมอื่นเปิดค้างอยู่ หรือดิสก์เต็ม\n" +
+      "ถ้าอยู่หน้านี้ต่อ ระบบจะลองบันทึกใหม่ให้เรื่อย ๆ", "ออกโดยไม่บันทึก", "อยู่หน้านี้ต่อ")) {
+    dropPending();
+    to();
+  }
+}
+
+// Toasts stack instead of covering each other; screen readers hear them.
+function toast(text, ms = 2500, kind) {
+  let box = document.getElementById("toasts");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "toasts";
+    box.setAttribute("role", "status");
+    box.setAttribute("aria-live", "polite");
+    document.body.appendChild(box);
+  }
   const t = document.createElement("div");
-  t.className = "toast"; t.textContent = text;
-  document.body.appendChild(t);
+  t.className = "toast" + (kind === "err" ? " err" : ""); t.textContent = text;
+  box.appendChild(t);
   setTimeout(() => t.remove(), ms);
 }
+// A failure looks different from a success.
+const toastErr = (text, ms = 6000) => toast(text, ms, "err");
 
-// Small menu anchored under a button; closes on outside click or Esc.
+// Popovers that close each other: only one is open at a time.
+function closeOtherPops() {
+  const rm = document.getElementById("recmenu"), tb = document.getElementById("tbpop");
+  if (rm) rm.hidden = true;
+  if (tb) tb.hidden = true;
+}
+
+// Small menu anchored under a button; closes on outside click or Esc, which
+// gives focus back to the button. Arrow keys move between its items.
 function popMenu(anchor, items) {
   closePopMenu();
+  closeOtherPops();
   const m = document.createElement("div");
   m.className = "menu-pop";
+  m.setAttribute("role", "menu");
   for (const it of items) {
     const b = document.createElement("button");
     b.type = "button"; b.textContent = it.label;
+    b.setAttribute("role", "menuitem");
     if (it.danger) b.className = "danger";
     b.onclick = e => { e.stopPropagation(); closePopMenu(); it.run(); };
     m.appendChild(b);
   }
+  m.addEventListener("keydown", e => {
+    const bs = [...m.querySelectorAll("button")], i = bs.indexOf(document.activeElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      bs[(i + (e.key === "ArrowDown" ? 1 : -1) + bs.length) % bs.length].focus();
+    } else if (e.key === "Tab") {
+      closePopMenu(true);
+    }
+  });
   document.body.appendChild(m);
   const r = anchor.getBoundingClientRect();
   m.style.top = (r.bottom + 4) + "px";
   m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8)) + "px";
   anchor.closest(".ctools")?.classList.add("open");
+  anchor.setAttribute("aria-expanded", "true");
   m._anchor = anchor;
+  m.querySelector("button")?.focus();
 }
-function closePopMenu() {
+function closePopMenu(refocus) {
   document.querySelectorAll(".menu-pop").forEach(m => {
     m._anchor?.closest(".ctools")?.classList.remove("open");
+    m._anchor?.setAttribute("aria-expanded", "false");
+    if (refocus && m.contains(document.activeElement)) m._anchor?.focus();
     m.remove();
   });
 }
@@ -124,7 +205,7 @@ document.addEventListener("click", e => { if (!e.target.closest(".menu-pop")) cl
 // no address bar to come back); step cards handle their own reorder drops.
 document.addEventListener("dragover", e => e.preventDefault());
 document.addEventListener("drop", e => e.preventDefault());
-document.addEventListener("keydown", e => { if (e.key === "Escape") closePopMenu(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closePopMenu(true); });
 
 // ---------------------------------------------------------------- status poll
 // Every page follows a recording that just finished (stopped from the panel, a
@@ -153,8 +234,10 @@ function startStatusPoll(onStatus, ms, beforeLeave) {
 let COVER_HOLD = false;  // a guide page waiting on its pass owns the cover
 function redactCover(r) {
   let c = document.getElementById("redcover");
+  // the image editor keeps the page under it inert after the cover goes
   const inert = on => { for (const el of document.body.children)
-    if (el !== c && !el.classList.contains("toast")) el.inert = on; };
+    if (el !== c && el.id !== "toasts")
+      el.inert = on || (el.id === "app" && typeof IED !== "undefined" && IED.open); };
   if (!r) { if (c) { c.remove(); c = null; inert(false); } return; }
   if (!c) {
     document.activeElement?.blur?.();
@@ -170,6 +253,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && TI
 
 function boot() {
   const gid = Q.get("guide"), pid = Q.get("pg");
+  if (NAV_MSG[Q.get("msg")]) toastErr(NAV_MSG[Q.get("msg")], 8000);
   if (gid) guidePage(gid, Q.get("mode") === "edit" ? "edit" : "view");
   else if (pid) pageDocPage(pid, Q.get("mode") === "edit" ? "edit" : "view");
   else shellPage(Q.get("page") || "home");

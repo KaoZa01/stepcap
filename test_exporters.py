@@ -141,6 +141,20 @@ def test_docx_sections():
     assert "อธิบาย *x*" in texts and "1. b" in texts and "คู่มือนี้ถูกลบแล้ว" not in texts
 
 
+def test_docx_no_template_leftovers():
+    from exporters import build_docx
+    b = build_docx(G, {})
+    z = _zip(b)
+    assert not any("thumbnail" in k for k in z), list(z)
+    assert b"<Application>StepCap</Application>" in z["docProps/app.xml"]
+    assert b"Macintosh" not in z["docProps/app.xml"] and b"thumbnail" not in z["_rels/.rels"]
+    assert b'w:val="th-TH"' in z["word/styles.xml"] and b'w:bidi="th-TH"' in z["word/styles.xml"]
+    d = _doc(b)
+    steps = [p.text for p in d.paragraphs if p.style.name == "Heading 2"]
+    assert steps == ["1. คลิก *บันทึก*", "2. ภาพ"], steps  # in Word's Navigation Pane
+    assert str(d.styles["Heading 1"].font.color.rgb) == "111827"
+
+
 def _doc(b: bytes):
     import docx
     return docx.Document(BytesIO(b))
@@ -203,7 +217,10 @@ def _app():
     import tempfile
     from pathlib import Path
     if "app" not in sys.modules:
+        import atexit
+        import shutil
         os.environ["STEPCAP_STORAGE"] = tempfile.mkdtemp(prefix="stepcap-exp-")
+        atexit.register(shutil.rmtree, os.environ["STEPCAP_STORAGE"], True)
     import app
     assert str(app.STORAGE) == os.environ["STEPCAP_STORAGE"]
     return app
@@ -245,8 +262,9 @@ def test_export_write_error_reported():
     bad = str(st / "no" / "such" / "x.html")
     app.WINDOW = type("W", (), {"create_file_dialog": lambda self, *a, **k: (bad,)})()
     for fmt, body in (("html", b"<html></html>"), ("md", b'{"images": []}\n')):
-        assert app.export_guide("g1", fmt, body) == {"saved": None, "error": "บันทึกไฟล์ไม่ได้"}
-    assert app.download_image("g1", "1", "png", PNG) == {"saved": None, "error": "บันทึกไฟล์ไม่ได้"}
+        assert app.export_guide("g1", fmt, body) == app.SAVE_FAILED
+    assert app.download_image("g1", "1", "png", PNG) == app.SAVE_FAILED
+    assert app.SAVE_FAILED["error"].startswith("บันทึกไฟล์ไม่ได้")
 
 
 if __name__ == "__main__":

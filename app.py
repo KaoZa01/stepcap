@@ -205,6 +205,15 @@ class Handler(BaseHTTPRequestHandler):
         return self._missing()
 
     def do_POST(self):
+        try:
+            self._post()
+        except OSError:  # a file that can't be written: answer, never drop the line
+            try:
+                self._send(500, "write failed", "text/plain")
+            except OSError:
+                pass
+
+    def _post(self):
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         if not self._auth(qs):
@@ -380,7 +389,7 @@ def show_main():
 def start_rec_ui():
     if not REC.start_recording():
         return
-    OV.toast(REC.monitor_rect(), "Start Record")
+    OV.toast(REC.monitor_rect(), "เริ่มบันทึกแล้ว")
     h = main_hwnd()
     recorder.set_capture_excluded(h, True)
     # Collapse into the panel unless the window sits on another monitor,
@@ -528,7 +537,7 @@ def _file_title(gid: str) -> str | None:
     return exporters.safe_title(g.get("title") or "")
 
 
-SAVE_FAILED = {"saved": None, "error": "บันทึกไฟล์ไม่ได้"}
+SAVE_FAILED = {"saved": None, "error": "บันทึกไฟล์ไม่ได้ ไฟล์เดิมอาจเปิดค้างอยู่ ปิดไฟล์นั้นหรือเลือกที่บันทึกอื่น"}
 
 
 def save_as(filename: str, data: bytes, file_type: str) -> str | None:
@@ -610,7 +619,7 @@ def _export(title: str, fmt: str, body: bytes, load, gid: str) -> dict:
             images, missing = _export_images(gid, guide, body)
             data = (exporters.build_markdown if fmt == "md" else exporters.build_docx)(guide, images)
     except Exception:
-        return {"saved": None, "error": "สร้าง PDF ไม่สำเร็จ" if fmt == "pdf" else "สร้างไฟล์ไม่สำเร็จ"}
+        return {"saved": None, "error": ("สร้าง PDF ไม่สำเร็จ" if fmt == "pdf" else "สร้างไฟล์ไม่สำเร็จ") + " ลองใหม่อีกครั้ง"}
     try:
         out = {"saved": save_as(f"{title}.{ext}", data, filt)}
     except OSError:
@@ -834,7 +843,7 @@ def make_icon_image(color):
     return img
 
 
-_COLORS = {"idle": (30, 30, 30, 255), "rec": (220, 40, 40, 255),
+_COLORS = {"idle": (251, 146, 60, 255), "rec": (220, 40, 40, 255),
            "pause": (230, 190, 40, 255)}
 
 
@@ -844,7 +853,7 @@ class Tray:
         self.pystray = pystray
         self.rec = rec
         self.icon = pystray.Icon("stepcap", make_icon_image(_COLORS["idle"]),
-                                 "StepCap", menu=self._menu())
+                                 "StepCap - ว่าง", menu=self._menu())
 
     def _state(self) -> str:
         if not self.rec.recording:
@@ -935,8 +944,8 @@ def main():
 
     WINDOW = webview.create_window(
         "StepCap", f"http://127.0.0.1:{PORT}/?t={TOKEN}", width=1280,
-        height=820, min_size=(900, 600), background_color="#FFFFFF",
-        text_select=True)
+        height=820, min_size=(900, 500), background_color="#FFFFFF",
+        text_select=True, zoomable=True)
     WINDOW.events.closing += on_closing
     WINDOW.events.shown += on_shown
     try:
