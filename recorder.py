@@ -96,7 +96,8 @@ class _Typing:
             body = (f'พิมพ์รหัสผ่านในช่อง "{self.field}"'
                     if self.field else "พิมพ์รหัสผ่าน")
         else:
-            where = f' ในช่อง "{self.field}"' if self.field else ""
+            # the field name too: some apps name an edit box after its value
+            where = f' ในช่อง "{self.mask(self.field)}"' if self.field else ""
             body = f'พิมพ์ "{self.mask("".join(self.chars))}"{where}'
         if self.ending:
             body += f" แล้วกด {self.ending}"

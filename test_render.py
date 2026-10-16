@@ -456,6 +456,33 @@ def test_resize_redaction_after_release():
     js("closeImageEditor();")
 
 
+def test_drag_stays_on_image():
+    js(_OPEN)
+    js(_PTR + "document.querySelector('.ied [data-tool=select]').click();"
+       "const k = r.width / c.width;"
+       "ev('pointerdown', 50 * k, 145 * k); ev('pointermove', 450 * k, 400 * k);"
+       "ev('pointerup', 450 * k, 400 * k);")
+    b = js("return IED.step.annotations[0];")  # box 80x50 on a 320x200 picture
+    assert (round(b["x"]), round(b["y"])) == (240, 150), b
+    js("IED.undo(); closeImageEditor();")
+
+
+def test_arrow_end_drags():
+    js(_OPEN)
+    js(_PTR + "document.querySelector('.ied [data-tool=select]').click();"
+       "const k = r.width / c.width;"
+       "ev('pointerdown', 200 * k, 40 * k); ev('pointerup', 200 * k, 40 * k);"   # select it
+       "ev('pointerdown', 250 * k, 60 * k); ev('pointermove', 290 * k, 150 * k);"  # its head
+       "ev('pointerup', 290 * k, 150 * k);")
+    a = js("return IED.step.annotations[1];")
+    assert (round(a["x1"]), round(a["y1"])) == (150, 20), a          # tail stays
+    assert (round(a["x2"]), round(a["y2"])) == (290, 150), a
+    js("IED.undo();")
+    a = js("return IED.step.annotations[1];")
+    assert (a["x2"], a["y2"]) == (250, 60), a
+    js("closeImageEditor();")
+
+
 def test_colour_picked_before_drawing():
     js(_OPEN)
     # pick red first, then place a ring: the ring is red
@@ -565,7 +592,8 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_blur_at_image_edges_hides_pixels, test_blur_keeps_earlier_black,
          test_repeated_paste_from_caption_box, test_gif_stays_locked_after_undo,
          test_ring_takes_custom_colour, test_ctrl_z_with_thai_layout,
-         test_resize_redaction_after_release, test_colour_picked_before_drawing,
+         test_resize_redaction_after_release, test_drag_stays_on_image, test_arrow_end_drags,
+         test_colour_picked_before_drawing,
          test_settings_page_redact, test_redact_cover_and_note,
          test_editor_redact_button, test_pasted_image_redacted, test_export_menu_formats]
 

@@ -48,7 +48,7 @@ _CHECKS = {"thai_id": _thai_id_ok, "card": _luhn_ok}
 # image text take one extra word and spaces around "@" -- a word too many
 # blurred beats a name left readable. Typed text keeps the strict pattern.
 _OCR_PATTERNS = {**_PATTERNS, "email": re.compile(
-    r"(?:[\w.+-]+ )?[\w.+-]+ ?@ ?[\w-]+(?:\.[\w-]+)+")}
+    r"(?:[\w.+-]+ )?[\w.+-]+ ?@ ?[\w-]+(?: ?\. ?[\w-]+)+")}
 
 
 def find_spans(text: str, rules: Iterable[str], custom: Iterable[str],
@@ -165,7 +165,7 @@ def ocr_lines(path: Path) -> list[list[tuple[str, tuple[float, float, float, flo
     from PIL import Image
     try:
         with Image.open(path) as im:
-            img = im.convert("RGBA")
+            img = _upright(im).convert("RGBA")
     except Exception:
         raise RedactError("อ่านภาพไม่ได้")
     from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
@@ -192,6 +192,12 @@ def ocr_lines(path: Path) -> list[list[tuple[str, tuple[float, float, float, flo
              for wd in line.words] for line in res.lines]
 
 
+def _upright(im):
+    """As the page draws it: browsers apply a JPEG's EXIF rotation."""
+    from PIL import ImageOps
+    return ImageOps.exif_transpose(im)
+
+
 async def _recognize(engine, bmp):
     return await engine.recognize_async(bmp)
 
@@ -201,7 +207,7 @@ def find_rects(path: Path, rules: Iterable[str], custom: Iterable[str]) -> list[
     from PIL import Image
     lines = ocr_lines(path)
     with Image.open(path) as im:
-        size = im.size
+        size = _upright(im).size
     rules, custom = list(rules), list(custom)
     return [r for ln in lines for r in line_rects(ln, rules, custom, size)]
 

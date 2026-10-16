@@ -296,6 +296,12 @@ def test_save_guide_sets_id_and_updated_atomically():
         assert save_guide(st, "missing", {"steps": []}) is False
 
 
+def test_safe_name_rejects_drives_and_controls():
+    from library import safe_name
+    assert safe_name("a.png") and not safe_name("C:") and not safe_name("C:x.png")
+    assert not safe_name("a\x00b") and not safe_name("..") and not safe_name("a/b")
+
+
 def test_settings_roundtrip():
     with tempfile.TemporaryDirectory() as d:
         st = Path(d)

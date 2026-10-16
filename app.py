@@ -609,11 +609,12 @@ def print_pdf(html: str) -> bytes:
         # an empty title would make WebView2 title the PDF with our temp file name
         win.evaluate_js("document.title.trim() || (document.title = 'StepCap'); 1")
         from System import Action
-        from System.Threading.Tasks import Task
+        from System.Threading.Tasks import Task, TaskStatus
         done, res = threading.Event(), {}
 
         def finished(t):
-            res["ok"] = not t.IsFaulted and t.Result
+            # faulted or cancelled: Result would throw and leave us waiting
+            res["ok"] = t.Status == TaskStatus.RanToCompletion and t.Result
             done.set()
 
         def go():
@@ -822,6 +823,8 @@ def main():
         poke_running()
         return
     shell32.SetCurrentProcessExplicitAppUserModelID("StepCap")
+    for f in (STORAGE / "_tmp").glob("print-*"):  # left by a crash mid-PDF
+        f.unlink(missing_ok=True)
     ensure_app_icon(ICON_FILE)
 
     rec = Recorder(STORAGE)

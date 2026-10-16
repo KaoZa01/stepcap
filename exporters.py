@@ -48,12 +48,26 @@ def meta_line(guide: dict) -> str:
     return " · ".join(parts)
 
 
+_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10))}
+
+
 def safe_title(title: str) -> str:
-    return re.sub(r'[\\/:*?"<>|]', "_", title or "").strip() or "guide"
+    """A Windows file name: no reserved chars, no trailing dots, no CON/NUL..."""
+    t = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", title or "").strip().rstrip(". ")
+    if t.split(".")[0].upper() in _RESERVED:
+        t = "_" + t
+    return t or "guide"
 
 
 def md_escape(text: str) -> str:
-    return re.sub(r"([\\`*_\[\]<>#|!])", r"\\\1", text or "").replace("\n", "  \n")
+    """Plain text in Markdown: inline syntax escaped, and line starts that
+    would make a list, rule or code block neutralised."""
+    out = []
+    for line in (text or "").split("\n"):
+        line = re.sub(r"([\\`*_\[\]<>#|!&~=])", r"\\\1", line.lstrip())
+        line = re.sub(r"^([-+])", r"\\\1", line)
+        out.append(re.sub(r"^(\d+)([.)])", r"\1\\\2", line))
+    return "  \n".join(out)
 
 
 def _one_line(text: str) -> str:
@@ -143,6 +157,13 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     from docx.shared import Emu, Inches, Mm
     from PIL import Image
     doc = docx.Document()
+    cp = doc.core_properties  # the template says "python-docx", 2013: guide's own instead
+    cp.title, cp.author, cp.comments, cp.last_modified_by = guide.get("title", ""), "", "", ""
+    for k in ("created", "modified"):
+        try:
+            setattr(cp, k, datetime.fromisoformat(guide.get(k if k == "created" else "updated", "")))
+        except (TypeError, ValueError):
+            pass
     for name in ("Normal", "Title", "List Number"):
         _thai_font(doc.styles[name])
     sec = doc.sections[0]

@@ -232,7 +232,7 @@ ${drawStepCanvas}
 }
 
 const PRINT_CSS = "@page{size:A4;margin:14mm}body{padding:0}" +
-  ".rg-step{break-inside:avoid}.rg-step img{max-width:100%;height:auto}";
+  ".rg-step{break-inside:avoid}.rg-step img{max-width:100%;max-height:230mm;width:auto;height:auto}";
 
 // Finished pictures for Markdown and Word: every PNG comes from renderStepPng,
 // so hidden parts are really gone; a GIF is only flagged (the server reads it
@@ -280,9 +280,10 @@ async function exportGuide(gid, format = "html") {
     }
     const res = await api("/api/guide/" + encodeURIComponent(gid) + "/export?format=" + format,
       {method: "POST", headers: {"Content-Type": type}, body});
-    r = res.ok ? await res.json() : {error: "ส่งออกไม่สำเร็จ"};
+    r = res.ok ? await res.json()
+      : {error: res.status === 409 ? "คู่มือนี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง" : "โปรแกรมตอบกลับผิดพลาด"};
   } catch {
-    r = {error: "ส่งออกไม่สำเร็จ"};
+    r = {error: "สร้างไฟล์ไม่สำเร็จ"};
   } finally {
     EXPORTING = false;
   }

@@ -152,9 +152,11 @@ async function iedAutoRedact() {
   if (!b || b.classList.contains("busy") || !IED.img || iedGif()) return;
   b.classList.add("busy");
   const step = IED.step;
-  const n = await autoRedact(step, true, iedPush);
+  // the undo point belongs to that step only if it's still the one open
+  const n = await autoRedact(step, true, () => { if (IED.open && IED.step === step) iedPush(); });
   b.classList.remove("busy");
-  if (n === null || !IED.open || IED.step !== step) return;
+  if (n === null) return;
+  if (!IED.open || IED.step !== step) { if (n) renderSteps(); return; }
   toast(n ? `ซ่อนเพิ่ม ${n} จุด` : "ไม่พบข้อมูลที่ต้องซ่อน");
   if (n) iedChanged();
 }
@@ -192,10 +194,10 @@ function iedDraw() {
     const it = IED.sel.item, b = iedBounds(it);
     g.save();
     g.lineWidth = 2 * u; g.strokeStyle = "#2563eb";
-    if (iedResizable(it)) {
-      g.strokeRect(b.x, b.y, b.w, b.h);
+    if (iedHandles(it).length) {
+      if (iedResizable(it)) g.strokeRect(b.x, b.y, b.w, b.h);
       g.fillStyle = "#fff";
-      for (const c of iedCorners(it)) {  // handles, 10 screen px
+      for (const c of iedHandles(it)) {  // handles, 10 screen px
         g.fillRect(c.x - 5 * u, c.y - 5 * u, 10 * u, 10 * u);
         g.strokeRect(c.x - 5 * u, c.y - 5 * u, 10 * u, 10 * u);
       }
@@ -250,14 +252,19 @@ function iedHit(p) {
 const iedResizable = it => it && (it.type === "box" || it.type === "blur" || it.type === "black");
 const iedCorners = it => [{x: it.x, y: it.y}, {x: it.x + it.w, y: it.y},
   {x: it.x + it.w, y: it.y + it.h}, {x: it.x, y: it.y + it.h}];  // tl, tr, br, bl
+// Arrows reshape from either end.
+const iedHandles = it => it?.type === "arrow" ? [{x: it.x1, y: it.y1}, {x: it.x2, y: it.y2}]
+  : iedResizable(it) ? iedCorners(it) : [];
 function iedHandleAt(p) {
-  const it = IED.sel?.item;
-  if (!iedResizable(it)) return -1;
   const tol = 8 * iedUnit();
-  return iedCorners(it).findIndex(c => Math.abs(p.x - c.x) <= tol && Math.abs(p.y - c.y) <= tol);
+  return iedHandles(IED.sel?.item).findIndex(c => Math.abs(p.x - c.x) <= tol && Math.abs(p.y - c.y) <= tol);
 }
 
 function iedMoveItem(it, orig, dx, dy) {
+  // the whole item stays on the picture
+  const b = iedBounds(orig), W = IED.canvas.width, H = IED.canvas.height;
+  dx = Math.max(-b.x, Math.min(W - b.x - b.w, dx));
+  dy = Math.max(-b.y, Math.min(H - b.y - b.h, dy));
   if (it.type === "arrow") Object.assign(it, {x1: orig.x1 + dx, y1: orig.y1 + dy, x2: orig.x2 + dx, y2: orig.y2 + dy});
   else Object.assign(it, {x: orig.x + dx, y: orig.y + dy});
 }
@@ -268,8 +275,9 @@ async function iedDown(e) {
   const p = IED.toImage(e.clientX, e.clientY), st = IED.step;
   if (IED.tool === "select") {
     const h = iedHandleAt(p);
-    if (h >= 0) {  // resize: the opposite corner stays put
-      IED.drag = {handle: h, fixed: iedCorners(IED.sel.item)[(h + 2) % 4], moved: false};
+    if (h >= 0) {  // resize: the opposite corner (or arrow end) stays put
+      const it = IED.sel.item;
+      IED.drag = {handle: h, fixed: it.type === "arrow" ? null : iedCorners(it)[(h + 2) % 4], moved: false};
       return;
     }
     IED.sel = iedHit(p);
@@ -299,7 +307,11 @@ function iedMove(e) {
   const d = IED.drag;
   if (d && IED.sel) {
     if (!d.moved) { iedPush(); d.moved = true; }
-    if (d.handle !== undefined) {
+    if (d.handle !== undefined && !d.fixed) {  // an arrow end, kept on the picture
+      const it = IED.sel.item, q = iedRect(p, p), k = d.handle ? "2" : "1", o = d.handle ? "1" : "2";
+      if (Math.hypot(q.x - it["x" + o], q.y - it["y" + o]) >= MIN_DRAG)
+        Object.assign(it, {["x" + k]: q.x, ["y" + k]: q.y});
+    } else if (d.handle !== undefined) {
       const r = iedRect(d.fixed, p);
       if (r.w >= MIN_DRAG && r.h >= MIN_DRAG) Object.assign(IED.sel.item, r);
     } else {
@@ -310,7 +322,8 @@ function iedMove(e) {
   }
   if (IED.tool === "select" && e.target === IED.canvas) {  // hover cursor
     const h = iedHandleAt(p);
-    IED.canvas.style.cursor = h === 0 || h === 2 ? "nwse-resize" : h === 1 || h === 3 ? "nesw-resize"
+    IED.canvas.style.cursor = h >= 0 && IED.sel.item.type === "arrow" ? "crosshair"
+      : h === 0 || h === 2 ? "nwse-resize" : h === 1 || h === 3 ? "nesw-resize"
       : iedHit(p) ? "move" : "";
   }
 }

@@ -35,8 +35,9 @@ COPY_SUFFIX = " (สำเนา)"
 
 
 def safe_name(name: str) -> bool:
-    return name != "" and "/" not in name and "\\" not in name \
-        and ".." not in name
+    # ":" too: pathlib joins "C:x" onto another drive
+    return name != "" and ".." not in name \
+        and not any(c in "/\\:" or ord(c) < 32 for c in name)
 
 
 def safe_id(gid: str) -> bool:
