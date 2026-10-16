@@ -410,6 +410,21 @@ def test_resize_redaction_after_release():
     js("closeImageEditor();")
 
 
+def test_colour_picked_before_drawing():
+    js(_OPEN)
+    # pick red first, then place a ring: the ring is red
+    js(_PTR + "document.querySelector('.ied [data-tool=marker]').click();"
+       "document.querySelector('.ied-opts [data-c=\"#EF4444\"]').click();"
+       "ev('pointerdown', 100, 100); ev('pointerup', 100, 100);")
+    assert js("return IED.step.markers.at(-1).color;") == "#EF4444"
+    # pick blue for the next ring: the one just placed stays red
+    js(_PTR + "document.querySelector('.ied-opts [data-c=\"#3B82F6\"]').click();"
+       "ev('pointerdown', 150, 120); ev('pointerup', 150, 120);")
+    got = js("return IED.step.markers.slice(-2).map(m => m.color);")
+    assert got == ["#EF4444", "#3B82F6"], got
+    js("closeImageEditor();")
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
@@ -419,7 +434,7 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_blur_at_image_edges_hides_pixels, test_blur_keeps_earlier_black,
          test_repeated_paste_from_caption_box, test_gif_stays_locked_after_undo,
          test_ring_takes_custom_colour, test_ctrl_z_with_thai_layout,
-         test_resize_redaction_after_release]
+         test_resize_redaction_after_release, test_colour_picked_before_drawing]
 
 
 def run_all(holder):

@@ -255,17 +255,15 @@ async function iedDown(e) {
     iedDraw(); iedOpts();
   } else if (IED.tool === "marker") {
     iedPush();
-    const m = {x: p.x, y: p.y, ...clickStyle()};
-    st.markers.push(m);
-    IED.sel = {list: "markers", item: m};
+    // drawing tools never select what they draw: the colour row stays the
+    // tool's, so a new pick is for the next item, not the last one
+    st.markers.push({x: p.x, y: p.y, ...clickStyle(), color: IED.color});
     iedChanged();
   } else if (IED.tool === "text") {
     const text = await uiPrompt("พิมพ์ข้อความ");
     if (text === null || !text.trim()) return;
     iedPush();
-    const a = {type: "text", x: p.x, y: p.y, text: text.trim(), color: IED.color, size: IED.size};
-    st.annotations.push(a);
-    IED.sel = {list: "annotations", item: a};
+    st.annotations.push({type: "text", x: p.x, y: p.y, text: text.trim(), color: IED.color, size: IED.size});
     iedChanged();
   } else {
     IED.draft = {a: p, b: p};
@@ -311,9 +309,7 @@ function iedUp(e) {
   if (t === "arrow") {
     if (Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) < MIN_DRAG) return iedDraw();
     iedPush();
-    const a = {type: "arrow", x1: d.a.x, y1: d.a.y, x2: d.b.x, y2: d.b.y, color: IED.color, width: IED.width};
-    st.annotations.push(a);
-    IED.sel = {list: "annotations", item: a};
+    st.annotations.push({type: "arrow", x1: d.a.x, y1: d.a.y, x2: d.b.x, y2: d.b.y, color: IED.color, width: IED.width});
     return iedChanged();
   }
   const r = iedRect(d.a, d.b);
@@ -322,13 +318,9 @@ function iedUp(e) {
   if (t === "crop") {
     st.crop = r;
   } else if (t === "box") {
-    const a = {type: "box", ...r, color: IED.color, width: IED.width};
-    st.annotations.push(a);
-    IED.sel = {list: "annotations", item: a};
+    st.annotations.push({type: "box", ...r, color: IED.color, width: IED.width});
   } else {
-    const red = {type: t, ...r};  // "blur" | "black"
-    st.redactions.push(red);
-    IED.sel = {list: "redactions", item: red};
+    st.redactions.push({type: t, ...r});  // "blur" | "black"
   }
   iedChanged();
 }
