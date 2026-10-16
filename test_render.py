@@ -115,6 +115,8 @@ def seed(st: Path):
          "crop": None,
          "markers": [{"x": 50, "y": 50, "color": ORANGE, "size": 44}]},
     ], settings={"click_color": ORANGE})
+    (st / "zzbad").mkdir()
+    (st / "zzbad" / "guide.json").write_text('{"id": "zzbad", "ti', encoding="utf-8")
     pages = st / "_pages"
     pages.mkdir()
     for pid, title, gids in (("pg1", "รวมชุดแรก", ["noise", "old"]), ("pg2", "มีที่หาย", ["noise", "ghost"])):
@@ -205,17 +207,20 @@ def test_bake_hides_pixels():
     assert img.getpixel((300, 10)) == NOISE.getpixel((300, 10))  # untouched
 
 
+def _srcs(html: str) -> list:
+    return re.findall(r'<img[^>]* src="data:image/(\w+);base64,([^"]+)"', html)
+
+
 def test_export_contains_no_original():
     html = js("return await buildExportHtml(GID);")
     original = base64.b64encode(NOISE_PNG).decode()
     assert original[1000:1200] not in html
-    data = json.loads(re.search(r"const guide=(.*?);\n", html, re.S).group(1))
-    s = data["steps"][0]
-    assert s["crop"] is None and s["markers"] == [] and s["annotations"] == []
-    assert s["redactions"] == [] and "image" not in s
-    assert s["_src"].startswith("data:image/png;base64,")
-    img = png(s["_src"].split(",", 1)[1])
-    assert _black(img, range(20, 80), range(20, 60))
+    # plain HTML: readable where scripts are blocked (mail previews), no canvas
+    assert "<script" not in html and "<canvas" not in html, html[:300]
+    assert "noise step" in html and 'class="rg-num">1<' in html
+    kind, b64 = _srcs(html)[0]
+    assert kind == "png"
+    assert _black(png(b64), range(20, 80), range(20, 60))
 
 
 def test_render_sections():
@@ -258,8 +263,8 @@ def test_create_page_failure_reported():
 def test_print_html_uses_img():
     html = js("return await buildExportHtml('noise', {print: true});")
     assert "@page" in html and "break-inside:avoid" in html, html[:400]
-    data = json.loads(re.search(r"const guide=(.*?);\n", html, re.S).group(1))
-    assert data["steps"][0]["_img"] is True  # baked picture shown as <img>, not canvas
+    assert "counter(page)" in html  # page numbers at the foot of each page
+    assert len(_srcs(html)) == 3 and "<canvas" not in html
     assert "@page" not in js("return await buildExportHtml('noise');")
 
 
@@ -295,9 +300,7 @@ def test_bake_redaction_across_crop():
 
 def test_old_guide_exports_flattened():
     html = js("return await buildExportHtml('old');")
-    assert "data:image/png;base64," in html
-    data = json.loads(re.search(r"const guide=(.*?);\n", html, re.S).group(1))
-    assert data["steps"][0]["markers"] == []
+    assert [k for k, _ in _srcs(html)] == ["png"] and "<script" not in html
 
 
 def _png_js(name: str) -> str:
@@ -695,6 +698,152 @@ def test_pasted_image_redacted():
     assert len(js("return STATE.steps.at(-1).redactions;")) == 1
 
 
+# ---------------------------------------------------------------- QA sweep
+def _until(cond: str) -> str:
+    return _UNTIL + f"await until(() => {cond});"
+
+
+def test_export_fits_a_phone():
+    # long URLs / paths in step text must wrap, not push the page sideways
+    got = js("const g = {title: 'T', settings: {toc: true}, steps: [{id: 'a', kind: 'click',"
+             " text: 'https://example.com/' + 'x'.repeat(120)}, {id: 'b', kind: 'click',"
+             " text: '\\\\fileserver01\\\\HR_Department\\\\' + 'y'.repeat(80) + '.xlsx'}]};"
+             "const html = await buildExportHtml('', {doc: g});"
+             "const f = document.createElement('iframe'); f.style.width = '375px'; f.style.height = '600px';"
+             "document.body.appendChild(f); f.srcdoc = html;"
+             "await new Promise(r => f.onload = r);"
+             "const d = f.contentDocument.documentElement, out = [d.scrollWidth, d.clientWidth];"
+             "f.remove(); return out;")
+    assert got[0] <= got[1], got
+
+
+def test_sidebar_and_cards_keyboard():
+    page("page=home")
+    got = js(_until("document.querySelector('.card')") +
+             "const m = document.querySelector('.menu [data-page=settings]'); m.focus();"
+             "const focused = document.activeElement === m;"
+             "const card = document.querySelector('.card'); card.focus();"
+             "return [focused, document.activeElement === card, card.getAttribute('role')];")
+    assert got == [True, True, "button"], got
+    js("document.querySelector('.menu [data-page=pages]').click();" + _until("document.querySelector('.pcard')"))
+    # Enter opens it: the page navigates away, so fire and check afterwards
+    CTX["win"].evaluate_js("document.querySelector('.pcard').dispatchEvent("
+                           "new KeyboardEvent('keydown', {key: 'Enter'})); 1")
+    time.sleep(2.5)
+    w = CTX["win"]
+    w.evaluate_js(_B64)
+    assert "pg=" in js("return location.search;")
+
+
+def test_home_says_what_it_is_for():
+    page("page=home")
+    got = js(_until("document.querySelector('.intro')") + "return document.querySelector('.intro').textContent;")
+    assert "บันทึกการคลิกและการพิมพ์" in got, got
+
+
+def test_broken_guide_listed_and_open_says_why():
+    page("page=all")
+    got = js(_until("document.querySelector('.broken')") +
+             "return document.querySelector('.broken').textContent;")
+    assert "ไฟล์เสียหาย" in got, got
+    page("guide=zzbad")  # opens a damaged guide: back home, with the reason
+    time.sleep(2)
+    CTX["win"].evaluate_js(_B64)
+    got = js(_until("document.querySelector('.toast')") +
+             "return [location.search.includes('page=home'), document.querySelector('.toast').className,"
+             " document.querySelector('.toast').textContent];")
+    assert got[0] and "err" in got[1] and "เปิดคู่มือนี้ไม่ได้" in got[2], got
+
+
+def test_prompt_blank_name_blocked():
+    page("page=pages")
+    got = js(_until("document.getElementById('newpage')") +
+             "document.getElementById('newpage').click();" + "await until(() => document.querySelector('.ui-dlg'));"
+             "const d = document.querySelector('.ui-dlg'), i = d.querySelector('input');"
+             "const off = d.querySelector('.ok').disabled;"
+             "i.value = '   '; i.dispatchEvent(new Event('input'));"
+             "i.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));"
+             "const stillOpen = d.open, hint = !d.querySelector('.dlg-hint').hidden;"
+             "i.value = 'ok'; i.dispatchEvent(new Event('input'));"
+             "const on = !d.querySelector('.ok').disabled; d.close(''); return [off, stillOpen, hint, on];")
+    assert got == [True, True, True, True], got
+
+
+def test_rec_menu_esc_and_one_popover():
+    page("page=home")
+    got = js(_until("document.getElementById('recbtn')") +
+             "document.querySelector('.card .more').click();" + "await until(() => document.querySelector('.menu-pop'));"
+             "const first = document.activeElement === document.querySelector('.menu-pop button');"
+             "document.getElementById('recbtn').click();"
+             "await until(() => !document.getElementById('recmenu').hidden);"
+             "const popGone = !document.querySelector('.menu-pop');"
+             "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));"
+             "return [first, popGone, document.getElementById('recmenu').hidden,"
+             " document.activeElement.id];")
+    assert got == [True, True, True, "recbtn"], got
+
+
+def test_toasts_stack_and_errors_differ():
+    got = js("toast('a', 3000); toastErr('b', 3000);"
+             "const t = [...document.querySelectorAll('#toasts .toast')];"
+             "const r = t.map(e => e.getBoundingClientRect().top);"
+             "const out = [t.length, r[0] !== r[1], t[1].classList.contains('err'),"
+             " document.getElementById('toasts').getAttribute('aria-live')];"
+             "t.forEach(e => e.remove()); return out;")
+    assert got == [2, True, True, "polite"], got
+
+
+def test_step_reorder_buttons_and_note():
+    page("guide=edge&mode=edit")
+    js(_until("document.querySelector('.step [data-act=down]')") +
+       "document.querySelector('#edit-e1 [data-act=down]').click();")
+    got = js("return [STATE.steps.map(s => s.id), document.activeElement.closest('.step')?.id,"
+             " document.querySelector('#edit-e2 [data-act=up]').disabled];")
+    assert got == [["e2", "e1"], "edit-e1", True], got
+    got = js("document.querySelector('.addnote').click();"
+             "const n = STATE.steps.at(-1), i = document.activeElement;"
+             "return [n.kind, n.text, i.classList.contains('stext'), i.placeholder];")
+    assert got == ["note", "", True, "พิมพ์หมายเหตุ"], got
+
+
+def test_editor_is_modal_and_esc_closes():
+    page("guide=noise&mode=edit")
+    got = js("openImageEditor('a1'); await IED.ready;"
+             "const inert = document.getElementById('app').inert;"
+             "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));"
+             "return [inert, IED.open, document.getElementById('app').inert, !!document.querySelector('.ied')];")
+    assert got == [True, False, False, False], got
+
+
+def test_done_when_save_fails_asks():
+    page("guide=cropx&mode=edit")
+    got = js(_until("document.getElementById('title')") +
+             "const f = window.fetch; window.fetch = async (u, o) =>"
+             " (o && o.method === 'POST') ? new Response('', {status: 500}) : f(u, o);"
+             "const t = document.getElementById('title'); t.value = 'x'; t.dispatchEvent(new Event('input'));"
+             "document.getElementById('done').click();"
+             "await until(() => document.querySelector('.ui-dlg'));"
+             "const d = document.querySelector('.ui-dlg'), txt = d.textContent;"
+             "d.querySelector('.cancel').click(); window.fetch = f;"
+             "await new Promise(r => setTimeout(r, 300));"
+             "return [txt.includes('บันทึกการแก้ไขล่าสุดไม่ได้'), txt.includes('ออกโดยไม่บันทึก'),"
+             " location.search.includes('mode=edit')];")
+    assert got == [True, True, True], got
+    js("await saveNow();")  # leave the guide saved for the tests after
+
+
+def test_page_save_failure_warns_once():
+    page("pg=pg1&mode=edit")
+    got = js(_until("document.getElementById('ptitle')") +
+             "const f = window.fetch; window.fetch = async (u, o) =>"
+             " (o && o.method === 'POST') ? new Response('', {status: 500}) : f(u, o);"
+             "document.querySelectorAll('.toast').forEach(t => t.remove());"
+             "await pageSaveNow(); await pageSaveNow(); await pageSaveNow();"
+             "const n = document.querySelectorAll('.toast.err').length; window.fetch = f;"
+             "await pageSaveNow(); return n;")
+    assert got == 1, got
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
          test_render_sections, test_failed_labels_in_document_order,
          test_create_page_failure_reported,
@@ -715,7 +864,12 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_pages_list, test_page_view_numbering, test_page_view_missing_guide,
          test_page_export_images_no_original, test_page_html_skips_deleted_guide,
          test_page_edit_add_and_move,
-         test_add_to_page_from_guide]
+         test_add_to_page_from_guide,
+         test_export_fits_a_phone, test_home_says_what_it_is_for, test_toasts_stack_and_errors_differ,
+         test_prompt_blank_name_blocked, test_rec_menu_esc_and_one_popover,
+         test_step_reorder_buttons_and_note, test_editor_is_modal_and_esc_closes,
+         test_done_when_save_fails_asks, test_page_save_failure_warns_once,
+         test_broken_guide_listed_and_open_says_why, test_sidebar_and_cards_keyboard]
 
 
 def run_all(holder):

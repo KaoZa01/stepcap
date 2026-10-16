@@ -3,7 +3,7 @@
 "use strict";
 
 const PAGES = {
-  home: {name: "Home", icon: "home", render: renderHome},
+  home: {name: "หน้าแรก", icon: "home", render: renderHome},
   all: {name: "คู่มือทั้งหมด", icon: "docs", render: renderAll},
   pages: {name: "Pages", icon: "page", render: renderPages},
   trash: {name: "ถังขยะ", icon: "trash", render: renderTrash},
@@ -18,7 +18,7 @@ async function shellPage(page) {
       <div class="logo">${LOGO}<span>StepCap</span></div>
       <label class="search">${ICON.search}<input id="q" type="search" placeholder="ค้นหา" autocomplete="off"></label>
       <nav class="menu">${Object.entries(PAGES).map(([k, p]) =>
-        `<a data-page="${k}">${ICON[p.icon]}<span>${esc(p.name)}</span></a>`).join("")}</nav>
+        `<button type="button" data-page="${k}">${ICON[p.icon]}<span>${esc(p.name)}</span></button>`).join("")}</nav>
     </aside>
     <div class="main">
       <header class="top"><div class="crumb" id="crumb"></div>
@@ -26,7 +26,7 @@ async function shellPage(page) {
           <div id="recmenu" class="pop" hidden></div></div></header>
       <div class="scroll"><div class="content"><div id="banners"></div><div id="content"></div></div></div>
     </div></div>`;
-  document.querySelectorAll(".menu a").forEach(a => a.onclick = () => {
+  document.querySelectorAll(".menu button").forEach(a => a.onclick = () => {
     if (a.dataset.page !== "all") { QTEXT = ""; document.getElementById("q").value = ""; }
     go(a.dataset.page);
   });
@@ -39,6 +39,12 @@ async function shellPage(page) {
   document.addEventListener("click", e => {
     if (!e.target.closest(".rec-wrap")) document.getElementById("recmenu").hidden = true;
   });
+  document.addEventListener("keydown", e => {
+    const m = document.getElementById("recmenu");
+    if (e.key !== "Escape" || !m || m.hidden) return;
+    m.hidden = true;
+    document.getElementById("recbtn").focus();
+  });
   try { VIEW = (await getJSON("/api/settings")).view || "grid"; } catch { /* keep default */ }
   go(PAGES[page] ? page : "home");
   startStatusPoll(applyStatus, 500);
@@ -47,12 +53,23 @@ async function shellPage(page) {
 function go(page) {
   PAGE = page;
   history.replaceState(null, "", "?" + new URLSearchParams({t: T, page}).toString());
-  document.querySelectorAll(".menu a").forEach(a => a.classList.toggle("on", a.dataset.page === page));
+  document.querySelectorAll(".menu button").forEach(a => {
+    a.classList.toggle("on", a.dataset.page === page);
+    if (a.dataset.page === page) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
   const p = PAGES[page];
   document.getElementById("crumb").innerHTML = `${ICON[p.icon]}<span>${esc(p.name)}</span>`;
   refresh();
 }
-const refresh = () => PAGES[PAGE].render(document.getElementById("content"));
+// A list that can't load says so, with a way to try again, instead of a blank page.
+const refresh = () => {
+  const c = document.getElementById("content");
+  return PAGES[PAGE].render(c).catch(() => {
+    c.innerHTML = `<div class="empty">โหลดข้อมูลไม่สำเร็จ<br><br>
+      <button type="button" class="btn" id="retry">ลองใหม่</button></div>`;
+    c.querySelector("#retry").onclick = refresh;
+  });
+};
 
 // ---------------------------------------------------------------- status
 function applyStatus(st) {
@@ -89,31 +106,37 @@ function renderBanners(st) {
   }
   const el = document.getElementById("banners");
   el.innerHTML = h;
-  el.querySelector('[data-act="pause"]')?.addEventListener("click", async () => { await post("/api/pause"); TICK(); });
-  el.querySelector('[data-act="stop"]')?.addEventListener("click", stopRecording);
+  el.querySelector('[data-act="pause"]')?.addEventListener("click", e =>
+    busy(e.currentTarget, async () => { await postOk("/api/pause"); TICK(); }));
+  el.querySelector('[data-act="stop"]')?.addEventListener("click", e => busy(e.currentTarget, stopRecording));
 }
 
 async function stopRecording() {
-  const r = await (await post("/api/stop")).json();
+  let r = {};
+  try { r = await (await post("/api/stop")).json(); } catch { toastErr("หยุดบันทึกไม่สำเร็จ ลองใหม่อีกครั้ง"); }
   if (r.guide) goGuide(r.guide, "edit"); else TICK();
 }
 
 // ---------------------------------------------------------------- record menu
 async function onRecButton(e) {
   e.stopPropagation();
-  if (STATUS && STATUS.recording) return stopRecording();
+  closePopMenu();
+  const b = e.currentTarget;
+  if (STATUS && STATUS.recording) return busy(b, stopRecording);
   const m = document.getElementById("recmenu");
   if (!m.hidden) { m.hidden = true; return; }
   if (!STATUS) STATUS = await getJSON("/api/status");
   m.innerHTML = `<div class="pop-h">เลือกจอที่จะบันทึก</div><div class="mons"></div>
-    <button class="btn dark full" id="startrec">${ICON.rec} เริ่มบันทึก</button>`;
+    <button class="btn dark full" id="startrec">${ICON.rec} เริ่มบันทึก</button>
+    <div class="muted small" style="margin-top:8px">หยุดได้ที่แผงมุมจอ หรือกด Ctrl+Alt+R</div>`;
   monitorList(m.querySelector(".mons"));
-  m.querySelector("#startrec").onclick = async () => {
+  m.querySelector("#startrec").onclick = ev => busy(ev.currentTarget, async () => {
+    if (!(await postOk("/api/start"))) toastErr("เริ่มบันทึกไม่สำเร็จ ลองใหม่อีกครั้ง");
     m.hidden = true;
-    await post("/api/start");
     TICK();
-  };
+  });
   m.hidden = false;
+  m.querySelector("#startrec").focus();
 }
 
 const lastFlash = {};
@@ -170,30 +193,39 @@ function guideTools(el, g) {
   t.innerHTML = `<button type="button" class="tool bm" title="${g.bookmarked ? "เลิกบุ๊กมาร์ก" : "บุ๊กมาร์ก"}">` +
     `${g.bookmarked ? ICON.bookmarkFill : ICON.bookmark}</button>` +
     `<button type="button" class="tool more" title="เพิ่มเติม">${ICON.more}</button>`;
-  t.querySelector(".bm").onclick = async e => {
+  t.querySelector(".bm").setAttribute("aria-label", t.querySelector(".bm").title);
+  t.querySelector(".more").setAttribute("aria-label", "เพิ่มเติม");
+  t.querySelector(".bm").onclick = e => {
     e.stopPropagation();
-    await post(`/api/guide/${encodeURIComponent(g.id)}/meta`, {bookmarked: !g.bookmarked});
-    refresh();
+    busy(e.currentTarget, async () => {
+      if (!(await postOk(`/api/guide/${encodeURIComponent(g.id)}/meta`, {bookmarked: !g.bookmarked})))
+        toastErr(FAILED);
+      refresh();
+    });
   };
   t.querySelector(".more").onclick = e => {
     e.stopPropagation();
     const id = encodeURIComponent(g.id), anchor = e.currentTarget;
+    const del = {label: "ลบ", danger: true, run: async () => {
+      if (await postOk(`/api/guide/${id}/delete`)) toast("ย้ายไปถังขยะแล้ว"); else toastErr(FAILED);
+      refresh();
+    }};
+    if (g.broken) return popMenu(anchor, [del]);
     popMenu(anchor, [
       {label: "เปิด", run: () => goGuide(g.id, "view")},
       {label: "เปลี่ยนชื่อ", run: async () => {
         const title = await uiPrompt("เปลี่ยนชื่อคู่มือ", g.title);
         if (title !== null && title.trim()) {
-          if (!(await post(`/api/guide/${id}/meta`, {title})).ok) toast(FAILED);
+          if (await postOk(`/api/guide/${id}/meta`, {title})) toast("เปลี่ยนชื่อแล้ว"); else toastErr(FAILED);
           refresh();
         }
       }},
       {label: "ทำสำเนา", run: async () => {
-        toast((await post(`/api/guide/${id}/duplicate`)).ok ? "ทำสำเนาแล้ว" : FAILED); refresh();
+        if (await postOk(`/api/guide/${id}/duplicate`)) toast("ทำสำเนาแล้ว"); else toastErr(FAILED);
+        refresh();
       }},
       {label: "ส่งออก", run: () => exportMenu(anchor, g.id)},
-      {label: "ลบ", danger: true, run: async () => {
-        toast((await post(`/api/guide/${id}/delete`)).ok ? "ย้ายไปถังขยะแล้ว" : FAILED); refresh();
-      }},
+      del,
     ]);
   };
 }
@@ -204,15 +236,21 @@ function drawGuides(box, items, emptyText) {
   wrap.className = VIEW === "grid" ? "cards" : "rows";
   for (const g of items) {
     const el = document.createElement("div");
-    el.className = (VIEW === "grid" ? "card" : "row") + (g.bookmarked ? " marked" : "");
+    el.className = (VIEW === "grid" ? "card" : "row") + (g.bookmarked ? " marked" : "") + (g.broken ? " broken" : "");
+    const info = g.broken ? `<span class="muted">ไฟล์เสียหาย เปิดไม่ได้</span>`
+      : `${esc(g.ago)}<span class="dot">·</span>${g.count} ขั้นตอน`;
     el.innerHTML = VIEW === "grid"
       ? `<div class="ctools"></div><div class="app">${appIcon(g)}<span>${esc(g.app)}</span></div>
          <div class="title">${esc(g.title)}</div>
-         <div class="meta">${esc(g.ago)}<span class="dot">·</span>${g.count} ขั้นตอน</div>`
+         <div class="meta">${info}</div>`
       : `${appIcon(g)}<div class="r-title">${esc(g.title)}</div><div class="r-app">${esc(g.app)}</div>
-         <div class="r-ago">${esc(g.ago)}</div><div class="r-count">${g.count} ขั้นตอน</div><div class="ctools"></div>`;
+         <div class="r-ago">${g.broken ? info : esc(g.ago)}</div>
+         <div class="r-count">${g.broken ? "" : g.count + " ขั้นตอน"}</div><div class="ctools"></div>`;
     guideTools(el, g);
-    el.onclick = e => { if (!e.target.closest(".ctools")) goGuide(g.id, "view"); };
+    activatable(el, () => g.broken
+      ? toastErr("ไฟล์ของคู่มือนี้เสียหาย เปิดไม่ได้ ดูไฟล์ guide.json ในโฟลเดอร์ " + g.id +
+        " (ตั้งค่า > เปิดโฟลเดอร์) หรือลบทิ้งจากเมนู …", 9000)
+      : goGuide(g.id, "view"), g.title);
     wrap.appendChild(el);
   }
   box.replaceChildren(wrap);
@@ -221,15 +259,24 @@ function drawGuides(box, items, emptyText) {
 const EMPTY_ALL = "ยังไม่มีคู่มือ กด + บันทึกใหม่ เพื่อเริ่ม";
 const FAILED = "ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง";
 
+// What the app is for, said once on the home page; first run also gets the steps.
+const INTRO = `<p><b>StepCap</b> บันทึกการคลิกและการพิมพ์ของคุณเป็นคู่มือทีละขั้นตอนพร้อมภาพ
+  แล้วส่งออกเป็น Word, PDF, HTML หรือ Markdown ให้คนอื่นทำตามได้</p>`;
+const FIRST_RUN = `<ol><li>กด <b>+ บันทึกใหม่</b> แล้วเลือก <b>เริ่มบันทึก</b> หน้าต่างนี้จะย่อลง</li>
+  <li>ทำงานในโปรแกรมที่จะสอนตามปกติ ทุกคลิกและการพิมพ์จะกลายเป็นขั้นตอน</li>
+  <li>กด <b>หยุดบันทึก</b> ที่แผงมุมขวาล่าง (หรือ Ctrl+Alt+R) คู่มือจะเปิดให้แก้ไขทันที</li></ol>`;
+
 async function renderHome(c) {
   const my = ++RENDER;
-  const all = await getJSON("/api/guides");
+  const [all, pages] = await Promise.all([getJSON("/api/guides"), getJSON("/api/pages")]);
   if (my !== RENDER) return;
   const recents = [...all].sort((a, b) => b.bookmarked - a.bookmarked).slice(0, 8);
-  c.innerHTML = `<section><div class="sec-h"><h2>ล่าสุด</h2>${viewToggle()}</div><div id="recents"></div>
+  c.innerHTML = `<div class="intro">${INTRO}${all.length ? "" : FIRST_RUN}</div>
+    <section><div class="sec-h"><h2>ล่าสุด</h2>${viewToggle()}</div><div id="recents"></div>
       ${all.length ? `<div class="center"><button type="button" class="btn" id="seeall">ดูทั้งหมด</button></div>` : ""}</section>
     <section><div class="sec-h"><h2>สถิติ</h2></div>
-      <div class="stats"><div class="stat">${ICON.docs}<span>คู่มือทั้งหมด</span><b>${all.length}</b></div></div></section>`;
+      <div class="stats"><div class="stat">${ICON.docs}<span>คู่มือทั้งหมด</span><b>${all.length}</b></div>
+        <div class="stat">${ICON.page}<span>Page ทั้งหมด</span><b>${pages.length}</b></div></div></section>`;
   drawGuides(c.querySelector("#recents"), recents, EMPTY_ALL);
   bindViewToggle(c);
   c.querySelector("#seeall")?.addEventListener("click", () => go("all"));
@@ -265,22 +312,22 @@ async function renderTrash(c) {
       : `<p class="empty">ถังขยะว่าง</p>`}`;
   c.querySelectorAll(".row").forEach(row => {
     const id = encodeURIComponent(row.dataset.id);
-    row.querySelector('[data-act="restore"]').onclick = async () => {
-      const r = await post(`/api/trash/${id}/restore`);
-      toast(r.ok ? "กู้คืนแล้ว" : "กู้คืนไม่ได้ มีคู่มือรหัสเดียวกันอยู่แล้ว");
+    row.querySelector('[data-act="restore"]').onclick = e => busy(e.currentTarget, async () => {
+      if (await postOk(`/api/trash/${id}/restore`)) toast("กู้คืนแล้ว");
+      else toastErr("กู้คืนไม่ได้ อาจมีคู่มือรหัสเดียวกันอยู่แล้ว หรือไฟล์ถูกเปิดค้างอยู่");
       refresh();
-    };
-    row.querySelector('[data-act="purge"]').onclick = async () => {
+    });
+    row.querySelector('[data-act="purge"]').onclick = e => busy(e.currentTarget, async () => {
       if (!await uiConfirm("ลบถาวร? ไฟล์จะไปอยู่ในถังขยะของ Windows", "ลบถาวร")) return;
-      await post(`/api/trash/${id}/purge`);
+      if (await postOk(`/api/trash/${id}/purge`)) toast("ลบถาวรแล้ว"); else toastErr(FAILED);
       refresh();
-    };
+    });
   });
-  c.querySelector("#empty")?.addEventListener("click", async () => {
+  c.querySelector("#empty")?.addEventListener("click", e => busy(e.currentTarget, async () => {
     if (!await uiConfirm(`ล้างถังขยะทั้งหมด ${items.length} รายการ?`, "ล้างถังขยะ")) return;
-    await post("/api/trash/empty");
+    if (await postOk("/api/trash/empty")) toast("ล้างถังขยะแล้ว"); else toastErr(FAILED);
     refresh();
-  });
+  }));
 }
 
 async function renderSettings(c) {
@@ -296,24 +343,29 @@ async function renderSettings(c) {
       <div class="kv"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd><span>พัก/ทำต่อ</span></div>
       <div class="muted">ยังเปลี่ยนปุ่มลัดไม่ได้</div></div>
     <div class="set"><h3>ที่เก็บคู่มือ</h3><div class="path">${esc(s.storage)}</div>
+      <div class="muted small" style="margin-bottom:10px">โฟลเดอร์นี้มีภาพต้นฉบับก่อนเบลอด้วย
+        ส่งต่อเฉพาะไฟล์ที่กดส่งออก อย่าส่งทั้งโฟลเดอร์</div>
       <button type="button" class="btn" id="openf">${ICON.folder} เปิดโฟลเดอร์</button></div>
     <div class="set" id="setred"><h3>ซ่อนข้อมูลอัตโนมัติ</h3>
       <div class="muted">เบลอข้อมูลในภาพหลังบันทึกเสร็จ และในภาพที่เพิ่มทีหลัง
         อ่านได้เฉพาะตัวอักษรอังกฤษและตัวเลข ตรวจภาพอีกครั้งก่อนส่งให้คนอื่น</div>
-      <div class="soon"><label class="switch"><input type="checkbox" id="redon"
-        ${s.redact_on && !s.redact_error ? "checked" : ""} ${s.redact_error ? "disabled" : ""}><span></span></label>
-        <span>${s.redact_error ? "ใช้ไม่ได้บนเครื่องนี้: " + esc(s.redact_error) : "เปิดใช้"}</span></div>
+      <div class="soon"><label class="swlabel"><span class="switch"><input type="checkbox" id="redon"
+        ${s.redact_on && !s.redact_error ? "checked" : ""} ${s.redact_error ? "disabled" : ""}><span></span></span>
+        <span>${s.redact_error ? "ใช้ไม่ได้บนเครื่องนี้: " + esc(s.redact_error) : "เปิดใช้"}</span></label></div>
       <div class="redrules">${REDACT_RULES.map(([k, label]) => `<label class="chk">
         <input type="checkbox" data-rule="${k}" ${s.redact_rules.includes(k) ? "checked" : ""}> ${label}</label>`).join("")}</div>
       <div class="muted small">คำที่กำหนดเอง (บรรทัดละคำ)</div>
       <textarea id="redwords" class="dlg-in" rows="3" spellcheck="false">${esc(s.redact_custom.join("\n"))}</textarea></div>`;
   monitorList(c.querySelector("#setmons"));
-  c.querySelector("#openf").onclick = () => post("/api/open-folder");
+  c.querySelector("#openf").onclick = async () => { if (!(await postOk("/api/open-folder"))) toastErr(FAILED); };
   const red = c.querySelector("#setred");
-  red.querySelector("#redon").onchange = e => post("/api/settings", {redact_on: e.target.checked});
-  red.querySelectorAll("[data-rule]").forEach(b => b.onchange = () => post("/api/settings",
+  // every change saves at once and says whether it stuck
+  const save = async body => toast(...(await postOk("/api/settings", body)) ? ["บันทึกการตั้งค่าแล้ว", 1500]
+    : ["บันทึกการตั้งค่าไม่สำเร็จ", 6000, "err"]);
+  red.querySelector("#redon").onchange = e => save({redact_on: e.target.checked});
+  red.querySelectorAll("[data-rule]").forEach(b => b.onchange = () => save(
     {redact_rules: [...red.querySelectorAll("[data-rule]:checked")].map(x => x.dataset.rule)}));
-  red.querySelector("#redwords").onchange = e => post("/api/settings",
+  red.querySelector("#redwords").onchange = e => save(
     {redact_custom: e.target.value.split("\n").map(w => w.trim()).filter(Boolean)});
 }
 const REDACT_RULES = [["email", "อีเมล"], ["phone", "เบอร์โทรศัพท์"], ["thai_id", "เลขบัตรประชาชน"],

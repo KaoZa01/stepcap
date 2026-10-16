@@ -126,7 +126,7 @@ async function renderGuide(guide, root) {
       div.innerHTML = '<div class="rg-head"><div class="rg-num">' + (++n) + "</div><div>" + E(step.text) + "</div></div>";
       if (step._src && (step._gif || step._img || /\.gif$/i.test(step.image || ""))) {
         const gif = document.createElement("img");  // GIF animated as-is; _img: baked, for print
-        gif.className = "rg-gif"; gif.alt = ""; gif.src = step._src;
+        gif.className = "rg-gif"; gif.alt = step.text || ""; gif.src = step._src;
         div.appendChild(gif);
       } else if (step._src) {
         const cv = document.createElement("canvas");
@@ -138,6 +138,7 @@ async function renderGuide(guide, root) {
     }
     wrap.appendChild(div);
   }
+  if (!guide.steps.length) wrap.insertAdjacentHTML("beforeend", '<p class="rg-empty">ยังไม่มีขั้นตอน</p>');
 }
 
 async function guidePage(id, mode) {
@@ -153,7 +154,7 @@ async function guidePage(id, mode) {
     if (!r.ok) throw new Error(r.status);
     STATE = await r.json();
   } catch {
-    return nav({page: "home"});
+    return nav({page: "home", msg: "guide"});
   }
   document.title = "StepCap - " + STATE.title;
   const note = STATE.redact_note;  // what auto-redaction could not cover; never saved back
@@ -164,11 +165,12 @@ async function guidePage(id, mode) {
 
 function viewPage() {
   app.innerHTML = `<header class="gtop">
-      <button class="icon-btn" id="back" title="กลับหน้าหลัก">${ICON.back}</button>
+      <button class="icon-btn" id="back" title="กลับหน้าแรก" aria-label="กลับหน้าแรก">${ICON.back}</button>
       <div class="gtitle">${esc(STATE.title)}</div>
       <button class="btn" id="edit">${ICON.edit} แก้ไข</button>
       <button class="btn dark" id="exp">${ICON.export} ส่งออก</button>
-    </header><div class="gbody"><div id="rg"></div></div>`;
+    </header><div class="gbody"><div id="rg"></div>
+      ${STATE.steps.length ? "" : `<p class="muted">กด <b>แก้ไข</b> เพื่อเพิ่มภาพหรือหมายเหตุ หรือบันทึกใหม่จากหน้าแรก</p>`}</div>`;
   document.getElementById("back").onclick = () => nav({page: "home"});
   document.getElementById("edit").onclick = () => goGuide(GID, "edit");
   document.getElementById("exp").onclick = e => { e.stopPropagation(); exportMenu(e.currentTarget, GID); };
@@ -199,8 +201,10 @@ function renderStepPng(step, gid) {
 }
 
 // One self-contained HTML file that looks like view mode. Every non-GIF image
-// is flattened first, so no original screenshot ever leaves the machine.
-// print: the PDF source -- pictures as <img> (print waits for them) and A4 CSS.
+// is flattened first, so no original screenshot ever leaves the machine. The
+// file is plain HTML (pictures as <img>, no script): it reads the same in an
+// e-mail preview or a viewer that blocks JavaScript, and its text is searchable.
+// print: the PDF source -- adds A4 CSS with page numbers.
 // ponytail: one string with data URLs; past ~400 MB of pictures the JS string
 // limit throws and the export says it failed. Ship pictures as files if a
 // guide ever gets that big (Markdown/Word already send raw blobs).
@@ -219,7 +223,7 @@ async function buildExportHtml(gid, {print = false, failed = [], doc = null} = {
       } else if (s.image) {
         c._src = await asDataUrl(await renderStepPng(s, home));
         Object.assign(c, {crop: null, markers: [], annotations: [], redactions: []});
-        if (print) c._img = true;
+        c._img = true;
       }
     } catch {  // an unreadable image is exported without its picture
       failed.push(label[s.id]);
@@ -229,19 +233,23 @@ async function buildExportHtml(gid, {print = false, failed = [], doc = null} = {
     delete c.image;
     steps.push(c);
   }
-  // "<" escaped so step text such as "</script>" cannot end the script early
-  const json = JSON.stringify({...g, steps}).replace(/</g, "\\u003c");
+  const holder = document.createElement("div");
+  await renderGuide({...g, steps}, holder);  // every picture is an <img> here: no canvas, no script
   const css = document.getElementById("rg-css").textContent;
   return `<!doctype html><html lang="th"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(g.title)}</title>
-<style>body{margin:0;padding:32px 24px;background:#fff}${css}${print ? PRINT_CSS : ""}</style></head>
-<body><div id="root"></div><script>const guide=${json};
-${drawStepCanvas}
-(${renderGuide})(guide, document.getElementById("root"));<\/script></body></html>`;
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="StepCap">
+<title>${esc(g.title)}</title>
+<style>body{margin:0;padding:32px 24px;background:#fff}@media (max-width:480px){body{padding:16px 12px}}
+${css}${print ? PRINT_CSS : ""}</style></head>
+<body>${holder.innerHTML}</body></html>`;
 }
 
-const PRINT_CSS = "@page{size:A4;margin:14mm}body{padding:0}" +
-  ".rg-step{break-inside:avoid}.rg-step img{max-width:100%;max-height:230mm;width:auto;height:auto}";
+// A4 with "page / pages" at the bottom; a step never splits across pages and
+// a heading never sits alone at the foot of one.
+const PRINT_CSS = "@page{size:A4;margin:14mm 14mm 16mm;" +
+  "@bottom-center{content:counter(page) \" / \" counter(pages);font:10px 'Segoe UI',sans-serif;color:#6b7280}}" +
+  "body{padding:0}.rg-step{break-inside:avoid}.rg-secwrap{break-after:avoid}" +
+  ".rg-step img{max-width:100%;max-height:230mm;width:auto;height:auto}";
 
 // What a toast calls each step: its number, or "<guide> ขั้นที่ n" on a page
 // (numbers restart after each section there).
@@ -311,21 +319,23 @@ async function exportDoc(kind, id, format = "html") {
       type = "application/octet-stream";
     }
     const res = await api(base + "/export?format=" + format, {method: "POST", headers: {"Content-Type": type}, body});
-    r = res.ok ? await res.json() : res.status === 409 ? busy : {error: "โปรแกรมตอบกลับผิดพลาด"};
+    r = res.ok ? await res.json() : res.status === 409 ? busy : {error: "โปรแกรมตอบกลับผิดพลาด ลองใหม่อีกครั้ง"};
   } catch (e) {
-    r = e === busy ? busy : {error: "สร้างไฟล์ไม่สำเร็จ"};
+    r = e === busy ? busy : {error: "เตรียมภาพหรือเนื้อหาไม่ได้ ลองใหม่อีกครั้ง"};
   } finally {
     EXPORTING = false;
   }
   document.querySelectorAll(".toast").forEach(t => t.remove());
-  if (r.error) return toast("ส่งออกไม่สำเร็จ: " + r.error, 6000);
+  if (r.error) return toastErr("ส่งออกไม่สำเร็จ: " + r.error, 8000);
   if (!r.saved) return;  // cancelled
+  const name = String(r.saved).split(/[\\/]/).pop();
   failed.push(...(r.missing || []));  // pictures the server couldn't use (e.g. a GIF gone)
   const notes = [];
   if (failed.length) notes.push(`ภาพของขั้นที่ ${byDocOrder(failed, doc).join(", ")} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ`);
   if (r.skipped) notes.push(`ข้ามคู่มือที่ถูกลบ ${r.skipped} อัน`);
   for (const n of doc?.redact_notes || []) notes.push(n);  // a guide its pass couldn't cover
-  toast(notes.length ? "บันทึกไฟล์แล้ว แต่" + notes.join(" และ") : "บันทึกไฟล์แล้ว", notes.length ? 8000 : 2500);
+  if (notes.length) toastErr(`บันทึก ${name} แล้ว แต่` + notes.join(" และ"), 10000);
+  else toast(`บันทึก ${name} แล้ว`, 4000);
 }
 
 // ---------------------------------------------------------------- edit mode
@@ -351,7 +361,7 @@ async function saveNow() {
   let ok = false;
   try { ok = (await post("/api/guide/" + encodeURIComponent(GID), STATE)).ok; } catch { /* offline */ }
   if (!ok) {
-    if (!SAVE_FAILING) toast("บันทึกไม่สำเร็จ จะลองใหม่อัตโนมัติ");
+    if (!SAVE_FAILING) toastErr("บันทึกไม่สำเร็จ จะลองใหม่อัตโนมัติ");
     SAVE_FAILING = true;
     SAVET = setTimeout(saveNow, 3000);
   } else if (SAVE_FAILING) {
@@ -366,10 +376,10 @@ const flush = async () => !SAVET || await saveNow();
 
 function editPage() {
   app.innerHTML = `<header class="gtop">
-      <button class="icon-btn" id="back" title="กลับหน้าหลัก">${ICON.back}</button>
-      <input id="title" class="gtitle" type="text" value="${esc(STATE.title)}">
-      <button class="btn dark" id="done">${ICON.done} เสร็จสิ้น</button>
-      <button class="btn" id="exp">${ICON.export} ส่งออก</button>
+      <button class="icon-btn" id="back" title="กลับหน้าแรก" aria-label="กลับหน้าแรก">${ICON.back}</button>
+      <input id="title" class="gtitle" type="text" value="${esc(STATE.title)}" aria-label="ชื่อคู่มือ">
+      <button class="btn" id="done">${ICON.done} เสร็จสิ้น</button>
+      <button class="btn dark" id="exp">${ICON.export} ส่งออก</button>
     </header><div class="gbody edit"><div class="ewrap" id="ewrap"></div></div>
     <div class="etb">
       <button type="button" class="tb" data-act="addpage" data-tip="เพิ่มลง Page">${ICON.page}</button>
@@ -377,19 +387,22 @@ function editPage() {
       <button type="button" class="tb" data-pop="doc" data-tip="ตั้งค่าเอกสาร">${ICON.sliders}</button>
       <div class="tbpop" id="tbpop" hidden></div>
     </div>`;
+  app.querySelectorAll(".tb[data-tip]").forEach(b => b.setAttribute("aria-label", b.dataset.tip));
+  const drop = () => { clearTimeout(SAVET); SAVET = null; SAVE_FAILING = false; };
   document.getElementById("title").oninput = e => { STATE.title = e.target.value; scheduleSave(); };
-  document.getElementById("back").onclick = async () => { if (await flush()) nav({page: "home"}); };
-  document.getElementById("done").onclick = async () => { if (await flush()) goGuide(GID, "view"); };
+  document.getElementById("back").onclick = () => leaveEdit(flush, drop, () => nav({page: "home"}));
+  document.getElementById("done").onclick = () => leaveEdit(flush, drop, () => goGuide(GID, "view"));
   document.getElementById("exp").onclick = async e => {
     e.stopPropagation();
     const b = e.currentTarget;
     if (await flush()) exportMenu(b, GID);
+    else toastErr("ยังบันทึกการแก้ไขไม่ได้ จึงยังส่งออกไม่ได้ ลองใหม่อีกครั้ง");
   };
   document.querySelector('.tb[data-act="addpage"]').onclick = e => {
     e.stopPropagation(); addToPageMenu(e.currentTarget, GID);
   };
   document.querySelectorAll(".tb[data-pop]").forEach(b => b.onclick = e => {
-    e.stopPropagation(); toggleToolPop(b.dataset.pop, b);
+    e.stopPropagation(); closePopMenu(); toggleToolPop(b.dataset.pop, b);
   });
   document.addEventListener("click", e => {
     if (!e.target.closest(".etb")) document.getElementById("tbpop").hidden = true;
@@ -484,11 +497,12 @@ function renderDocPop(pop) {
 
 // ---- images: upload, add as a step, download one step's picture
 async function uploadImage(blob) {
+  toast("กำลังเพิ่มภาพ…", 1500);
   try {
     const r = await api("/api/guide/" + encodeURIComponent(GID) + "/image", {method: "POST", body: blob});
     if (r.ok) return (await r.json()).image;
   } catch { /* too large: the server closes the connection */ }
-  toast(UPLOAD_FAILED);
+  toastErr(UPLOAD_FAILED);
   return null;
 }
 
@@ -504,7 +518,7 @@ async function autoRedact(step, force, before) {
       {image, existing: step.redactions || [], force: !!force});
     res = r.ok ? await r.json() : {error: "ตรวจภาพไม่สำเร็จ"};
   } catch { res = {error: "ตรวจภาพไม่สำเร็จ"}; }
-  if (res.error) { toast("ซ่อนข้อมูลอัตโนมัติไม่ได้: " + res.error, 6000); return null; }
+  if (res.error) { toastErr("ซ่อนข้อมูลอัตโนมัติไม่ได้: " + res.error); return null; }
   if (step.image !== image) return 0;  // replaced meanwhile; those rects were for the old one
   if (res.rects.length) {
     before?.();
@@ -535,14 +549,14 @@ async function downloadStepImage(step) {
       ? await (await api("/img/" + encodeURIComponent(GID) + "/" + encodeURIComponent(step.image))).blob()
       : await renderStepPng(step, GID);
   } catch {
-    return toast("เปิดภาพนี้ไม่ได้");
+    return toastErr("เปิดภาพนี้ไม่ได้");
   }
   let r;
   try {
     r = await (await api("/api/guide/" + encodeURIComponent(GID) + "/download?n=" + n,
       {method: "POST", body})).json();
   } catch { r = {error: "ดาวน์โหลดไม่สำเร็จ"}; }
-  if (r.error) toast("บันทึกภาพไม่สำเร็จ: " + r.error, 6000);
+  if (r.error) toastErr("บันทึกภาพไม่สำเร็จ: " + r.error);
   else if (r.saved) toast("บันทึกภาพแล้ว");
 }
 
@@ -566,9 +580,12 @@ function renderSteps() {
     <button type="button" class="btn addimg">+ เพิ่มภาพ</button>
     <input type="file" accept="image/png,image/jpeg,image/gif" hidden>`;
   bar.querySelector(".addnote").onclick = () => {
-    STATE.steps.push({id: newStepId(), kind: "note", text: "หมายเหตุ...", image: null, crop: null,
-      markers: [], annotations: [], redactions: []});
+    const note = {id: newStepId(), kind: "note", text: "", image: null, crop: null,
+      markers: [], annotations: [], redactions: []};
+    STATE.steps.push(note);
     renderSteps(); scheduleSave();
+    const input = document.querySelector("#edit-" + note.id + " .stext");
+    if (input) { input.scrollIntoView({block: "center"}); input.focus(); }
   };
   const file = bar.querySelector("input[type=file]");
   bar.querySelector(".addimg").onclick = () => file.click();
@@ -602,17 +619,32 @@ function stepCard(step, i, num) {
   const el = document.createElement("div");
   el.className = "step";
   el.id = "edit-" + step.id;
+  const last = STATE.steps.length - 1;
+  const ib = (act, label, icon, on = true) => `<button type="button" class="icon-btn" data-act="${act}"
+    title="${label}" aria-label="${label}" ${on ? "" : "disabled"}>${icon}</button>`;
   el.innerHTML = `<div class="row1">${stepBadge(num)}
       <div class="txt">${num ? `<div class="kindtag">${esc(KIND_TH[step.kind] || step.kind)}</div>` : ""}
-        <input type="text" class="stext" value="${esc(step.text)}"
-          ${step.kind === "image" ? 'placeholder="คำอธิบายภาพ"' : ""}></div>
-      <button type="button" class="btn danger del">ลบ</button></div>`;
+        <input type="text" class="stext" value="${esc(step.text)}" aria-label="${num ? "ข้อความขั้นที่ " + num : "หมายเหตุ"}"
+          placeholder="${step.kind === "image" ? "คำอธิบายภาพ" : step.kind === "note" ? "พิมพ์หมายเหตุ" : ""}"></div>
+      <div class="sbtns">${ib("up", "เลื่อนขึ้น", ICON.up, i > 0)}${ib("down", "เลื่อนลง", ICON.down, i < last)}
+        ${ib("del", "ลบขั้นตอนนี้", ICON.trash)}</div></div>`;
   el.querySelector(".stext").oninput = e => { step.text = e.target.value; scheduleSave(); };
-  el.querySelector(".del").onclick = async () => {
+  el.querySelector('[data-act="del"]').onclick = async () => {
     if (!await uiConfirm("ลบขั้นตอนนี้?", "ลบ")) return;
     STATE.steps.splice(STATE.steps.indexOf(step), 1);
     renderSteps(); scheduleSave();
   };
+  // the keyboard way to reorder; focus follows the moved step
+  const move = (d, act) => {
+    const at = STATE.steps.indexOf(step);
+    STATE.steps.splice(at, 1);
+    STATE.steps.splice(at + d, 0, step);
+    renderSteps(); scheduleSave();
+    const b = document.querySelector(`#edit-${step.id} [data-act="${act}"]`);
+    (b && !b.disabled ? b : document.querySelector(`#edit-${step.id} .stext`))?.focus();
+  };
+  el.querySelector('[data-act="up"]').onclick = () => move(-1, "up");
+  el.querySelector('[data-act="down"]').onclick = () => move(1, "down");
   // drag only from the badge, so text selection stays free
   const handle = el.querySelector(".drag");
   handle.onpointerdown = () => { el.draggable = true; };
@@ -674,12 +706,13 @@ function gridCard(step, i, num) {
     img.src = imgUrl(GID, step.image);
   }
   dragSource(el, i); dropTarget(el, i);
-  el.onclick = () => {
+  activatable(el, () => {
     STATE.settings.layout = "linear";
     scheduleSave(); renderSteps();
     const pop = document.getElementById("tbpop");
     if (!pop.hidden && pop.dataset.kind === "doc") renderDocPop(pop);
     document.getElementById("edit-" + step.id)?.scrollIntoView({block: "start"});
-  };
+    document.querySelector("#edit-" + step.id + " .stext")?.focus({preventScroll: true});
+  }, num ? "แก้ไขขั้นที่ " + num : "แก้ไขหมายเหตุ");
   return el;
 }

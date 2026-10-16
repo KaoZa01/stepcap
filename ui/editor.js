@@ -61,9 +61,14 @@ function openImageEditor(stepId) {
       <button type="button" class="tb" data-act="replace" data-tip="เปลี่ยนภาพ">${IED_ICON.image}</button>
       <input type="file" accept="image/png,image/jpeg,image/gif" hidden>
       <button type="button" class="tb" data-act="download" data-tip="ดาวน์โหลดภาพ">${ICON.export}</button>
-      <button type="button" class="btn dark" data-act="done">${ICON.done} เสร็จ</button>
+      <button type="button" class="btn dark" data-act="done" title="ปิดตัวแก้ภาพ (Esc)">${ICON.done} เสร็จสิ้น</button>
     </div><div class="ied-opts"></div><div class="ied-stage"><canvas></canvas></div>`;
   document.body.appendChild(el);
+  // a full-window editor: the page behind takes no focus or clicks
+  IED.opener = document.activeElement;
+  document.getElementById("app").inert = true;
+  el.querySelectorAll(".tb[data-tip]").forEach(b => b.setAttribute("aria-label", b.dataset.tip));
+  el.querySelector('[data-act="done"]').focus();
   IED.canvas = el.querySelector("canvas");
   el.querySelectorAll("[data-tool]").forEach(b => b.onclick = () => {
     if (b.getAttribute("aria-disabled") !== "true") iedSetTool(b.dataset.tool);
@@ -93,8 +98,11 @@ function closeImageEditor() {
   document.removeEventListener("paste", iedPaste);
   window.removeEventListener("resize", iedLayout);
   document.querySelector(".ied")?.remove();
+  document.getElementById("app").inert = !!document.getElementById("redcover");
   Object.assign(IED, {open: false, history: [], sel: null, img: null, canvas: null});
+  const sid = IED.step?.id;
   renderSteps();
+  document.querySelector(`#edit-${sid} .ed`)?.focus();  // back where the editor was opened
 }
 
 function iedLoad() {
@@ -390,7 +398,8 @@ function iedKey(e) {
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); iedDelete(); }
   else if (e.key === "Escape") {
     if (IED.tool !== "select") iedSetTool("select");
-    else { IED.sel = null; iedDraw(); iedOpts(); }
+    else if (IED.sel) { IED.sel = null; iedDraw(); iedOpts(); }
+    else closeImageEditor();  // nothing left to let go of: Esc leaves, like "เสร็จสิ้น"
   }
 }
 

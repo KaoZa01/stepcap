@@ -65,7 +65,7 @@ class Overlay:
     def flash(self, rect, color="#fb923c"):
         self._q.put(lambda: self._flash(rect, color))
 
-    def toast(self, rect, text="Start Record"):
+    def toast(self, rect, text="เริ่มบันทึกแล้ว"):
         self._q.put(lambda: self._toast(rect, text))
 
     def show_panel(self, work_rect, get_state, on_pause, on_stop):
@@ -138,7 +138,8 @@ class Overlay:
 
     def _show_panel(self, work_rect, get_state, on_pause, on_stop):
         self._hide_panel()
-        BG, FG, MUTED, RED, YEL = "#1f2228", "#e8eaed", "#9aa2ad", "#ef4444", "#eab308"
+        # text red #f87171 and button red #b91c1c both clear 4.5:1 on their backgrounds
+        BG, FG, MUTED, RED, YEL = "#1f2228", "#e8eaed", "#9aa2ad", "#f87171", "#eab308"
         W = 340
         win = tk.Toplevel(self._root, bg=BG)
         win.overrideredirect(True)
@@ -171,7 +172,7 @@ class Overlay:
                               command=lambda: run(on_pause))
         pause_btn.pack(side="left")
         tk.Button(btns, text="หยุดบันทึก", font=(_FONT, 10, "bold"), relief="flat",
-                  bg=RED, fg="#ffffff", activebackground="#dc2626", padx=10,
+                  bg="#b91c1c", fg="#ffffff", activebackground="#991b1b", padx=10,
                   command=lambda: run(on_stop)).pack(side="right")
 
         # drag by the header; once moved, stop re-anchoring to the corner
