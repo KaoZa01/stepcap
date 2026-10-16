@@ -166,6 +166,17 @@ def _pending_guide(st, gid):
     return g
 
 
+def _open(fn, *a):
+    """Poll like the page does: 409 while a pass runs in the background."""
+    import threading
+    for _ in range(200):
+        got = fn(*a)
+        if got != 409:
+            return got
+        threading.Event().wait(0.05)
+    raise TimeoutError(a)
+
+
 def test_stop_gates_guide_until_redacted():
     import threading
     app = _app()
@@ -208,7 +219,8 @@ def test_pending_guide_redacted_when_opened():
     # the app quit mid-pass: opening the guide finishes the job first
     app = _app()
     _pending_guide(app.STORAGE, "gquit")
-    got = app.guide_for_page("gquit")
+    assert app.guide_for_page("gquit") == 409  # checked in the background, page shows the cover
+    got = _open(app.guide_for_page, "gquit")
     assert len(got["steps"][0]["redactions"]) == 1 and "redact_pending" not in got, got
 
 
@@ -219,13 +231,61 @@ def test_unchecked_guide_warns_until_checked():
     app.redact.available = lambda: "ไม่มี OCR ภาษาอังกฤษในเครื่อง"
     try:
         for _ in range(2):  # still unchecked: says so on every open
-            got = app.guide_for_page("gnote")
+            got = _open(app.guide_for_page, "gnote")
             assert "ไม่มี OCR" in got["redact_note"] and got["redact_pending"], got
     finally:
         app.redact.available = real
-    got = app.guide_for_page("gnote")  # OCR back: checked, blurred, quiet
+    got = _open(app.guide_for_page, "gnote")  # OCR back: checked, blurred, quiet
     assert "redact_note" not in got and "redact_pending" not in got, got
     assert len(got["steps"][0]["redactions"]) == 1
+
+
+def test_page_doc_waits_for_redaction():
+    import library
+    app = _app()
+    _pending_guide(app.STORAGE, "gpage")
+    pid = library.create_page(app.STORAGE, "p")["id"]
+    library.add_guide_to_page(app.STORAGE, pid, "gpage")
+    app.REDACT_BUSY["gpage"] = [0, 1]
+    try:
+        assert app.page_doc(pid) == 409
+    finally:
+        app.REDACT_BUSY.pop("gpage", None)
+    doc = _open(app.page_doc, pid)  # pending guide is checked on the way
+    assert doc["steps"][1]["id"] == "gpage/s1" and len(doc["steps"][1]["redactions"]) == 1, doc
+    assert app.page_doc("nope") == 404
+
+
+def test_page_keeps_redaction_warning():
+    # a guide that couldn't be checked must warn through its page too
+    import library
+    app = _app()
+    _pending_guide(app.STORAGE, "gwarn")
+    pid = library.create_page(app.STORAGE, "p")["id"]
+    library.add_guide_to_page(app.STORAGE, pid, "gwarn")
+    real = app.redact.available
+    app.redact.available = lambda: "ไม่มี OCR ภาษาอังกฤษในเครื่อง"
+    try:
+        notes = _open(app.page_doc, pid).get("redact_notes")
+    finally:
+        app.redact.available = real
+    assert notes and "t" in notes[0] and "ไม่มี OCR" in notes[0], notes
+
+
+def test_page_checks_pending_guides_together():
+    # several unchecked guides: all start at once, the page waits under its cover
+    import library
+    app = _app()
+    for gid in ("gm1", "gm2"):
+        _pending_guide(app.STORAGE, gid)
+    pid = library.create_page(app.STORAGE, "p")["id"]
+    for gid in ("gm1", "gm2"):
+        library.add_guide_to_page(app.STORAGE, pid, gid)
+    assert app.page_doc(pid) == 409
+    assert {"gm1", "gm2"} <= set(app.REDACT_BUSY) or "redact_pending" not in \
+        library.read_guide(app.STORAGE / "gm2")
+    doc = _open(app.page_doc, pid)
+    assert all(len(s["redactions"]) == 1 for s in doc["steps"] if s["kind"] == "click"), doc
 
 
 def test_available():

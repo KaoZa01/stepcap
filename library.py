@@ -333,3 +333,143 @@ def save_settings(storage: Path, **changes) -> dict:
     storage.mkdir(parents=True, exist_ok=True)
     write_json_atomic(storage / "settings.json", s)
     return s
+
+
+# -- pages: <storage>/_pages/<id>.json, documents that reference guides ---------
+PAGES_DIR = "_pages"
+DEFAULT_PAGE_SETTINGS = {"toc": True, "step_count": False, "created": False,
+                         "updated": False}
+
+
+def _is_page(d) -> bool:
+    if not isinstance(d, dict) or not isinstance(d.get("sections"), list):
+        return False
+    if not all(isinstance(d.get(k, ""), str) for k in ("title", "description", "created", "updated")):
+        return False
+    if not isinstance(d.get("settings", {}), dict):
+        return False
+    for s in d["sections"]:
+        if not isinstance(s, dict):
+            return False
+        if s.get("type") == "guide":
+            if not (isinstance(s.get("guide"), str) and safe_id(s["guide"])):
+                return False
+        elif s.get("type") == "text":
+            if not all(isinstance(s.get(k, ""), str) for k in ("title", "text")):
+                return False
+        else:
+            return False
+    return True
+
+
+def _page_file(storage: Path, pid: str) -> Path | None:
+    return storage / PAGES_DIR / f"{pid}.json" if safe_name(pid) else None
+
+
+def read_page(storage: Path, pid: str) -> dict | None:
+    f = _page_file(storage, pid)
+    try:
+        d = json.loads(f.read_text(encoding="utf-8")) if f else None
+    except (OSError, ValueError):
+        return None
+    if not _is_page(d):
+        return None
+    return {"title": "", "description": "", "created": "", **d, "id": pid,
+            "updated": d.get("updated") or d.get("created", ""),
+            "settings": {**DEFAULT_PAGE_SETTINGS, **(d.get("settings") or {})}}
+
+
+def save_page(storage: Path, pid: str, data: dict) -> bool:
+    f = _page_file(storage, pid)
+    if f is None or not f.is_file() or not _is_page(data):
+        return False
+    keep = {k: data[k] for k in ("title", "description", "created", "settings", "sections")
+            if k in data}  # not what the page screen adds for itself (guide titles)
+    seen = set()  # a guide appears once per page
+    keep["sections"] = [s for s in data["sections"] if s["type"] != "guide"
+                        or not (s["guide"] in seen or seen.add(s["guide"]))]
+    try:
+        write_json_atomic(f, {**keep, "id": pid, "updated": now_iso()})
+    except OSError:
+        return False
+    return True
+
+
+def create_page(storage: Path, title: str) -> dict:
+    root = storage / PAGES_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    base = "p" + time.strftime("%Y%m%d-%H%M%S")
+    pid, n = base, 1
+    while (root / f"{pid}.json").exists():
+        n += 1
+        pid = f"{base}-{n}"
+    now = now_iso()
+    page = {"id": pid, "title": title, "description": "", "created": now,
+            "updated": now, "settings": dict(DEFAULT_PAGE_SETTINGS), "sections": []}
+    write_json_atomic(root / f"{pid}.json", page)
+    return page
+
+
+def delete_page(storage: Path, pid: str) -> bool:
+    """A page is only a list of references: its guides stay untouched."""
+    f = _page_file(storage, pid)
+    if f is None or not f.is_file():
+        return False
+    f.unlink()
+    return True
+
+
+def list_pages(storage: Path, now: datetime | None = None) -> list[dict]:
+    now = now or datetime.now()
+    root = storage / PAGES_DIR
+    out = []
+    for f in root.glob("*.json") if root.is_dir() else []:
+        p = read_page(storage, f.stem)
+        if p is None:
+            continue
+        out.append({"id": p["id"], "title": p["title"] or p["id"],
+                    "count": sum(1 for s in p["sections"] if s["type"] == "guide"
+                                 and (storage / s["guide"] / "guide.json").is_file()),
+                    "updated": p["updated"], "ago": rel_time(p["updated"], now)})
+    out.sort(key=lambda p: (p["updated"], p["id"]), reverse=True)
+    return out
+
+
+def add_guide_to_page(storage: Path, pid: str, gid: str) -> str | None:
+    """'added', 'exists' (a guide appears once per page), None if either is gone."""
+    page = read_page(storage, pid)
+    if page is None or not safe_id(gid) or read_guide(storage / gid) is None:
+        return None
+    if any(s["type"] == "guide" and s["guide"] == gid for s in page["sections"]):
+        return "exists"
+    page["sections"].append({"type": "guide", "guide": gid})
+    return "added" if save_page(storage, pid, page) else None
+
+
+def compile_page(page: dict, guides: dict[str, dict | None]) -> tuple[dict, int]:
+    """The page as one guide-shaped document: a 'section' entry opens each
+    guide or text block (numbering restarts after it), guide steps get ids
+    '<gid>/<sid>' and carry 'gid' so pictures load from the right folder.
+    guides maps id -> guide, or None when it was deleted."""
+    settings = {**DEFAULT_PAGE_SETTINGS, **(page.get("settings") or {})}
+    steps, missing, count = [], 0, 0
+    for i, s in enumerate(page.get("sections") or []):
+        sec = {"id": f"sec{i}", "kind": "section"}
+        if s["type"] == "text":
+            steps.append({**sec, "text": s.get("title", ""), "body": s.get("text", "")})
+            continue
+        gid, g = s["guide"], guides.get(s["guide"])
+        if g is None:
+            missing += 1
+            steps.append({**sec, "text": "คู่มือนี้ถูกลบแล้ว", "missing": True, "gid": gid})
+            continue
+        count += 1
+        steps.append({**sec, "text": g.get("title", ""), "gid": gid})
+        steps += [{**st, "id": f"{gid}/{st.get('id')}", "gid": gid} for st in g.get("steps") or []]
+    doc = {"id": page.get("id"), "title": page.get("title", ""),
+           "description": page.get("description", ""),
+           "created": page.get("created", ""), "updated": page.get("updated", ""),
+           "settings": {**settings, "step_count": False}, "steps": steps}
+    if settings.get("step_count"):
+        doc["meta_count"] = f"{count} คู่มือ"
+    return doc, missing

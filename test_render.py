@@ -115,6 +115,14 @@ def seed(st: Path):
          "crop": None,
          "markers": [{"x": 50, "y": 50, "color": ORANGE, "size": 44}]},
     ], settings={"click_color": ORANGE})
+    pages = st / "_pages"
+    pages.mkdir()
+    for pid, title, gids in (("pg1", "รวมชุดแรก", ["noise", "old"]), ("pg2", "มีที่หาย", ["noise", "ghost"])):
+        (pages / f"{pid}.json").write_text(json.dumps(
+            {"id": pid, "title": title, "description": "", "created": "2026-10-16T10:00:00",
+             "updated": "2026-10-16T10:00:00", "settings": {"toc": True},
+             "sections": [{"type": "guide", "guide": g} for g in gids]}, ensure_ascii=False),
+            encoding="utf-8")
 
 
 def launch():
@@ -208,6 +216,43 @@ def test_export_contains_no_original():
     assert s["_src"].startswith("data:image/png;base64,")
     img = png(s["_src"].split(",", 1)[1])
     assert _black(img, range(20, 80), range(20, 60))
+
+
+def test_render_sections():
+    doc = {"title": "P", "settings": {"toc": True}, "steps": [
+        {"id": "sec0", "kind": "section", "text": "ก", "gid": "noise"},
+        {"id": "noise.x", "kind": "click", "text": "a"}, {"id": "noise.y", "kind": "click", "text": "b"},
+        {"id": "sec1", "kind": "section", "text": "ข", "body": "อธิบาย"},
+        {"id": "sec2", "kind": "section", "text": "ค", "gid": "old"},
+        {"id": "old.x", "kind": "click", "text": "c"},
+        {"id": "sec3", "kind": "section", "text": "คู่มือนี้ถูกลบแล้ว", "missing": True},
+        {"id": "sec4", "kind": "section", "text": "", "body": "ไม่มีหัวข้อ"}]}
+    got = js("const r = document.createElement('div'); document.body.appendChild(r);"
+             f"await renderGuide({json.dumps(doc, ensure_ascii=False)}, r);"
+             "const q = s => [...r.querySelectorAll(s)].map(e => e.textContent.trim());"
+             "const out = [q('.rg-sec'), q('.rg-num'), q('.rg-toc li'), q('.rg-body'), q('.rg-missing')];"
+             "r.remove(); return out;")
+    assert got == [["ก", "ข", "ค"], ["1", "2", "1"], ["ก", "ข", "ค"], ["อธิบาย", "ไม่มีหัวข้อ"],
+                   ["คู่มือนี้ถูกลบแล้ว"]], got
+
+
+def test_failed_labels_in_document_order():
+    # the page's own failures and the server's (GIFs) arrive separately
+    doc = {"steps": [{"id": "s0", "kind": "section", "text": "ก"},
+                     {"id": "a", "kind": "click"}, {"id": "b", "kind": "image"},
+                     {"id": "s1", "kind": "section", "text": "ข"}, {"id": "c", "kind": "click"}]}
+    got = js(f"return byDocOrder(['ข ขั้นที่ 1', 'ก ขั้นที่ 2', 'ก ขั้นที่ 1'], "
+             f"{json.dumps(doc, ensure_ascii=False)});")
+    assert got == ["ก ขั้นที่ 1", "ก ขั้นที่ 2", "ข ขั้นที่ 1"], got
+    assert js("return byDocOrder([3, 1], {steps: [{id: 'a'}, {id: 'b'}, {id: 'c'}]});") == [1, 3]
+
+
+def test_create_page_failure_reported():
+    got = js("const real = window.fetch; window.fetch = async () => new Response('', {status: 500});"
+             "let id; try { id = await newPage('x'); } finally { window.fetch = real; }"
+             "const t = [...document.querySelectorAll('.toast')].map(e => e.textContent);"
+             "document.querySelectorAll('.toast').forEach(e => e.remove()); return [id, t];")
+    assert got[0] is None and any("ไม่สำเร็จ" in t for t in got[1]), got
 
 
 def test_print_html_uses_img():
@@ -514,6 +559,75 @@ def test_export_menu_formats():
     assert got == ["HTML", "PDF", "Markdown (.zip)", "Word (.docx)"], got
 
 
+_UNTIL = ("const until = async f => { for (let i = 0; i < 100 && !f(); i++)"
+          " await new Promise(r => setTimeout(r, 100)); };")
+_TEXTS = "const q = s => [...document.querySelectorAll(s)].map(e => e.textContent.trim());"
+
+
+def test_pages_list():
+    page("page=pages")
+    got = js(_UNTIL + _TEXTS + "await until(() => document.querySelector('.pcard')); return q('.pcard');")
+    assert len(got) == 2 and any("รวมชุดแรก" in t and "2 คู่มือ" in t for t in got), got
+
+
+def test_page_view_numbering():
+    page("pg=pg1")
+    got = js(_UNTIL + _TEXTS + "await until(() => document.querySelector('.rg-sec'));"
+             "return [q('.rg-sec'), q('.rg-num')];")
+    assert got == [["noise - test", "old - test"], ["1", "2", "3", "1"]], got
+
+
+def test_page_view_missing_guide():
+    page("pg=pg2")
+    got = js(_UNTIL + _TEXTS + "await until(() => document.querySelector('.rg-missing'));"
+             "return [q('.rg-missing'), q('.toast')];")
+    assert got == [["คู่มือนี้ถูกลบแล้ว"], []], got
+
+
+def test_page_edit_add_and_move():
+    page("pg=pg1&mode=edit")
+    js(_UNTIL + "await until(() => document.getElementById('addguide'));"
+       "document.getElementById('addguide').click();"
+       "await until(() => document.querySelector('.ui-dlg [data-gid=broken]'));"
+       "document.querySelector('.ui-dlg [data-gid=old]').disabled || (() => { throw 'old not disabled' })();"
+       "document.querySelector('.ui-dlg [data-gid=broken]').click();"
+       "document.querySelector('.ui-dlg .ok').click();"
+       "await until(() => document.querySelectorAll('.psec').length === 3);"
+       "document.querySelector('.psec:last-child [data-act=up]').click();"
+       "await new Promise(r => setTimeout(r, 1200));")
+    got = js("return (await getJSON('/api/page/pg1')).sections.map(s => s.guide);")
+    assert got == ["noise", "broken", "old"], got
+
+
+def test_add_to_page_from_guide():
+    page("guide=cropx&mode=edit")
+    msgs = []
+    for _ in range(2):
+        msgs.append(js(_UNTIL + "document.querySelectorAll('.toast').forEach(t => t.remove());"
+                       "document.querySelector('[data-act=addpage]').click();"
+                       "await until(() => document.querySelector('.menu-pop'));"
+                       "[...document.querySelectorAll('.menu-pop button')]"
+                       ".find(b => b.textContent === 'มีที่หาย').click();"
+                       "await until(() => document.querySelector('.toast'));"
+                       "return document.querySelector('.toast').textContent;"))
+    assert msgs == ["เพิ่มลงใน มีที่หาย แล้ว", "มีอยู่ใน Page นี้แล้ว"], msgs
+
+
+def test_page_html_skips_deleted_guide():
+    html = js("const d = await getJSON('/api/page/pg2/doc');"
+              "return await buildExportHtml('', {doc: d});")
+    assert "ถูกลบแล้ว" not in html and "noise - test" in html
+
+
+def test_page_export_images_no_original():
+    r = js("const d = await getJSON('/api/page/pg1/doc'); const x = await exportImages(d, '');"
+           "const i = x.index.findIndex(e => e.id === 'noise/a1');"
+           "return {ids: x.index.map(e => e.id), png: await __b64(x.blobs[i])};")
+    assert "noise/a1" in r["ids"] and "old/o1" in r["ids"], r["ids"]
+    assert base64.b64encode(NOISE_PNG).decode()[1000:1200] not in r["png"]
+    assert _black(png(r["png"]), range(20, 80), range(20, 60))
+
+
 def test_settings_page_redact():
     page("page=settings")
     got = js("await new Promise(r => setTimeout(r, 500));"
@@ -582,6 +696,8 @@ def test_pasted_image_redacted():
 
 
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
+         test_render_sections, test_failed_labels_in_document_order,
+         test_create_page_failure_reported,
          test_export_images_no_original, test_export_images_skip_broken,
          test_html_export_names_missing_gif,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
@@ -595,7 +711,11 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_resize_redaction_after_release, test_drag_stays_on_image, test_arrow_end_drags,
          test_colour_picked_before_drawing,
          test_settings_page_redact, test_redact_cover_and_note,
-         test_editor_redact_button, test_pasted_image_redacted, test_export_menu_formats]
+         test_editor_redact_button, test_pasted_image_redacted, test_export_menu_formats,
+         test_pages_list, test_page_view_numbering, test_page_view_missing_guide,
+         test_page_export_images_no_original, test_page_html_skips_deleted_guide,
+         test_page_edit_add_and_move,
+         test_add_to_page_from_guide]
 
 
 def run_all(holder):

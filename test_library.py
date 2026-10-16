@@ -302,6 +302,124 @@ def test_safe_name_rejects_drives_and_controls():
     assert not safe_name("a\x00b") and not safe_name("..") and not safe_name("a/b")
 
 
+def test_page_crud():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1")
+        p = L.create_page(st, "เริ่มงาน")
+        assert L.safe_name(p["id"]) and p["sections"] == [] and p["settings"]["toc"] is True
+        got = L.read_page(st, p["id"])
+        assert got["title"] == "เริ่มงาน" and got["description"] == ""
+        assert L.save_page(st, p["id"], {**got, "sections": [{"type": "text", "title": "ก", "text": "ข"}]})
+        assert L.read_page(st, p["id"])["sections"][0]["text"] == "ข"
+        assert [x["id"] for x in L.list_pages(st)] == [p["id"]] and L.list_pages(st)[0]["count"] == 0
+        assert not L.save_page(st, p["id"], {**got, "sections": [{"type": "guide", "guide": "../x"}]})
+        assert L.delete_page(st, p["id"]) and L.read_page(st, p["id"]) is None
+        assert (st / "g1" / "guide.json").is_file()
+
+
+def test_add_guide_once():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1")
+        pid = L.create_page(st, "t")["id"]
+        assert L.add_guide_to_page(st, pid, "g1") == "added"
+        assert L.add_guide_to_page(st, pid, "g1") == "exists"
+        assert L.add_guide_to_page(st, "nope", "g1") is None
+        assert L.add_guide_to_page(st, pid, "nope") is None
+        assert L.list_pages(st)[0]["count"] == 1
+
+
+def test_save_page_drops_duplicate_guides():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        p = L.create_page(st, "t")
+        g = {"type": "guide", "guide": "g1"}
+        assert L.save_page(st, p["id"], {**p, "sections": [g, {"type": "text"}, g]})
+        assert L.read_page(st, p["id"])["sections"] == [g, {"type": "text"}]
+
+
+def test_page_count_skips_deleted_guides():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1")
+        p = L.create_page(st, "t")
+        L.save_page(st, p["id"], {**p, "sections": [{"type": "guide", "guide": "g1"},
+                                                    {"type": "guide", "guide": "gone"}]})
+        assert L.list_pages(st)[0]["count"] == 1
+
+
+def test_pages_hidden_from_guides():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1")
+        L.create_page(st, "t")
+        assert [g["id"] for g in list_guides(st)] == ["g1"] and list_trash(st) == []
+
+
+def test_list_pages_skips_bad():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        good = L.create_page(st, "ok")["id"]
+        (st / "_pages" / "bad.json").write_text("{oops", encoding="utf-8")
+        (st / "_pages" / "worse.json").write_text('{"title": "x", "sections": 5}', encoding="utf-8")
+        (st / "_pages" / "odd.json").write_text('{"title": "b", "sections": [], "updated": 5}',
+                                                encoding="utf-8")
+        assert [p["id"] for p in L.list_pages(st)] == [good]
+        assert L.read_page(st, "bad") is None and L.read_page(st, "worse") is None
+
+
+_GA = {"id": "g1", "title": "ก", "steps": [{"id": "s1", "kind": "click", "text": "a"},
+                                         {"id": "n", "kind": "note", "text": "x"},
+                                         {"id": "s2", "kind": "click", "text": "b"}]}
+_GB = {"id": "g2", "title": "ข", "steps": [{"id": "s1", "kind": "click", "text": "c"}]}
+
+
+def test_compile_numbering_and_sections():
+    import library as L
+    page = {"id": "p1", "title": "P", "settings": dict(L.DEFAULT_PAGE_SETTINGS),
+            "sections": [{"type": "guide", "guide": "g1"},
+                         {"type": "text", "title": "หัวข้อ", "text": "เนื้อหา"},
+                         {"type": "guide", "guide": "g2"}]}
+    doc, missing = L.compile_page(page, {"g1": _GA, "g2": _GB})
+    assert missing == 0 and doc["title"] == "P"
+    assert [s["kind"] for s in doc["steps"]] == \
+        ["section", "click", "note", "click", "section", "section", "click"]
+    assert [s["id"] for s in doc["steps"]] == \
+        ["sec0", "g1/s1", "g1/n", "g1/s2", "sec1", "sec2", "g2/s1"]
+    assert doc["steps"][4]["body"] == "เนื้อหา" and doc["steps"][1]["gid"] == "g1"
+    assert doc["steps"][0]["text"] == "ก"
+
+
+def test_compile_skips_missing():
+    import library as L
+    page = {"id": "p1", "title": "P", "settings": {}, "sections": [{"type": "guide", "guide": "g1"}]}
+    doc, missing = L.compile_page(page, {"g1": None})
+    assert missing == 1 and doc["steps"] == \
+        [{"id": "sec0", "kind": "section", "text": "คู่มือนี้ถูกลบแล้ว", "missing": True, "gid": "g1"}]
+
+
+def test_compile_ids_unique():
+    import library as L
+    page = {"id": "p1", "title": "P", "settings": {},
+            "sections": [{"type": "guide", "guide": "g2"}, {"type": "guide", "guide": "g3"}]}
+    doc, _ = L.compile_page(page, {"g2": _GB, "g3": {**_GB, "id": "g3"}})
+    ids = [s["id"] for s in doc["steps"]]
+    assert len(ids) == len(set(ids)), ids
+    # a folder renamed by hand may hold a dot: "a.b"+"c" must not meet "a"+"b.c"
+    page["sections"] = [{"type": "guide", "guide": "a.b"}, {"type": "guide", "guide": "a"}]
+    doc, _ = L.compile_page(page, {"a.b": {"steps": [{"id": "c", "kind": "click"}]},
+                                   "a": {"steps": [{"id": "b.c", "kind": "click"}]}})
+    ids = [s["id"] for s in doc["steps"]]
+    assert len(ids) == len(set(ids)), ids
+
+
 def test_settings_roundtrip():
     with tempfile.TemporaryDirectory() as d:
         st = Path(d)

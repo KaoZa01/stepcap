@@ -76,6 +76,71 @@ def test_md_safe_inner_name():
     assert list(_zip(build_markdown({**G, "title": ' a/b\\c?*"<>| '}, {}))) == ["a_b_c______.md"]
 
 
+PAGE_DOC = {"title": "เริ่มงาน", "created": "2026-10-16T10:00:00", "updated": "",
+            "settings": {"toc": True, "created": True}, "meta_count": "2 คู่มือ",
+            "steps": [{"id": "sec0", "kind": "section", "text": "ก", "gid": "g1"},
+                      {"id": "g1.s1", "kind": "click", "text": "a", "gid": "g1"},
+                      {"id": "sec1", "kind": "section", "text": "ข้อความ", "body": "อธิบาย *x*"},
+                      {"id": "sec2", "kind": "section", "text": "ข", "gid": "g2"},
+                      {"id": "g2.s1", "kind": "click", "text": "b", "gid": "g2"},
+                      {"id": "sec3", "kind": "section", "text": "คู่มือนี้ถูกลบแล้ว", "missing": True}]}
+
+
+def test_numbered_restarts_after_section():
+    from exporters import numbered
+    assert [n for n, _ in numbered(PAGE_DOC)] == [None, 1, None, None, 1, None]
+
+
+def test_meta_count_override():
+    assert meta_line(PAGE_DOC) == "2 คู่มือ · สร้างเมื่อ 16 ต.ค. 2569"
+
+
+def test_md_sections_images_unique():
+    z = _zip(build_markdown(PAGE_DOC, {"g1.s1": ("png", PNG), "g2.s1": ("png", _png((9, 9, 9)))}))
+    assert {"images/00-01.png", "images/02-01.png"} <= set(z), set(z)
+    md = z["เริ่มงาน.md"].decode("utf-8")
+    assert "## ก" in md and "### 1. a" in md and "### 1. b" in md, md
+    assert "อธิบาย \\*x\\*" in md and "[ก](#a0)" in md and '<a id="a0"></a>' in md, md
+    assert "ลบแล้ว" not in md, md
+    assert md.startswith("# เริ่มงาน\n\n2 คู่มือ · สร้างเมื่อ"), md
+
+
+def test_page_description_exported():
+    from exporters import build_docx
+    doc = {**PAGE_DOC, "description": "สำหรับพนักงานใหม่"}
+    assert "สำหรับพนักงานใหม่" in _zip(build_markdown(doc, {}))["เริ่มงาน.md"].decode("utf-8")
+    assert "สำหรับพนักงานใหม่" in [p.text for p in _doc(build_docx(doc, {})).paragraphs]
+
+
+def test_untitled_text_block_no_empty_heading():
+    from exporters import build_docx
+    doc = {**PAGE_DOC, "steps": PAGE_DOC["steps"][:3] +
+           [{"id": "sec9", "kind": "section", "text": "", "body": "แค่ข้อความ"}]}
+    md = _zip(build_markdown(doc, {}))["เริ่มงาน.md"].decode("utf-8")
+    assert "## \n" not in md and "[](#" not in md and "แค่ข้อความ" in md, md
+    d = _doc(build_docx(doc, {}))
+    assert [p.text for p in d.paragraphs if p.style.name in ("Heading 1", "List Number")] == \
+        ["ก", "ข้อความ", "ก", "ข้อความ"]
+    assert "แค่ข้อความ" in [p.text for p in d.paragraphs]
+
+
+def test_only_deleted_sections_dropped():
+    # a plain step that happens to carry "missing" is still a step
+    from exporters import build_docx
+    doc = {**G, "steps": [{"id": "a", "kind": "click", "text": "ยังอยู่", "missing": True}]}
+    assert "ยังอยู่" in _zip(build_markdown(doc, {}))["คู่มือ_ ทดสอบ.md"].decode("utf-8")
+    assert "1. ยังอยู่" in [p.text for p in _doc(build_docx(doc, {})).paragraphs]
+
+
+def test_docx_sections():
+    from exporters import build_docx
+    d = _doc(build_docx(PAGE_DOC, {}))
+    heads = [p.text for p in d.paragraphs if p.style.name == "Heading 1"]
+    assert heads == ["ก", "ข้อความ", "ข"], heads
+    texts = [p.text for p in d.paragraphs]
+    assert "อธิบาย *x*" in texts and "1. b" in texts and "คู่มือนี้ถูกลบแล้ว" not in texts
+
+
 def _doc(b: bytes):
     import docx
     return docx.Document(BytesIO(b))
