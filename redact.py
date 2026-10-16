@@ -44,14 +44,20 @@ def _luhn_ok(s: str) -> bool:
 
 
 _CHECKS = {"thai_id": _thai_id_ok, "card": _luhn_ok}
+# OCR splits emails at "@" and inside the name ("userl 1 @mail.com"); on
+# image text take one extra word and spaces around "@" -- a word too many
+# blurred beats a name left readable. Typed text keeps the strict pattern.
+_OCR_PATTERNS = {**_PATTERNS, "email": re.compile(
+    r"(?:[\w.+-]+ )?[\w.+-]+ ?@ ?[\w-]+(?:\.[\w-]+)+")}
 
 
-def find_spans(text: str, rules: Iterable[str],
-               custom: Iterable[str]) -> list[tuple[int, int]]:
-    """(start, end) of every match, sorted, overlaps merged."""
+def find_spans(text: str, rules: Iterable[str], custom: Iterable[str],
+               ocr: bool = False) -> list[tuple[int, int]]:
+    """(start, end) of every match, sorted, overlaps merged. ocr=True for
+    text read from an image (looser email pattern)."""
     spans = []
     for r in rules:
-        pat, ok = _PATTERNS.get(r), _CHECKS.get(r)
+        pat, ok = (_OCR_PATTERNS if ocr else _PATTERNS).get(r), _CHECKS.get(r)
         if pat is None:
             continue
         spans += [m.span() for m in pat.finditer(text) if not ok or ok(m.group())]
@@ -89,7 +95,7 @@ def line_rects(words: list[tuple[str, tuple[float, float, float, float]]],
         text += w
     W, H = size
     out = []
-    for a, b in find_spans(text, list(rules), list(custom)):
+    for a, b in find_spans(text, list(rules), list(custom), ocr=True):
         hit = [r for (s, e), (_, r) in zip(pos, words) if s < b and e > a]
         if not hit:
             continue

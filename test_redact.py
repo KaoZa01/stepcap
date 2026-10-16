@@ -54,6 +54,15 @@ def test_rects_join_split_words():
         [{"type": "blur", "x": 46, "y": 0, "w": 118, "h": 24}]
 
 
+def test_rects_email_split_by_ocr():
+    # OCR often breaks an email at "@" and inside the name: still one blur over all of it
+    words = [("sample", (0, 0, 60, 20)), ("userl", (70, 0, 40, 20)),
+             ("1", (112, 0, 8, 20)), ("@mail.com", (122, 0, 80, 20))]
+    assert line_rects(words, ["email"], [], (400, 100)) == \
+        [{"type": "blur", "x": 66, "y": 0, "w": 140, "h": 24}]
+    assert mask_text("text me @x.co", ["email"], []) == "text me @x.co"  # typed text stays strict
+
+
 def test_rects_clamped():
     r = line_rects([("me@x.co", (2, 1, 60, 18))], RULES, [], (60, 18))[0]
     assert (r["x"], r["y"], r["x"] + r["w"], r["y"] + r["h"]) == (0, 0, 60, 18)
