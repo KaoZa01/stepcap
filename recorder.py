@@ -152,7 +152,7 @@ class StepBuilder:
 
     def add_click(self, kind: str, name: str, control_type: int, app: str,
                   image: str | None = None, marker: dict | None = None,
-                  exe: str = "") -> dict:
+                  exe: str = "", target: dict | None = None) -> dict:
         self._flush()
         step = {
             "id": _new_id(),
@@ -164,6 +164,8 @@ class StepBuilder:
             "crop": None,
             "markers": [marker] if marker else [],
         }
+        if target:
+            step["target"] = target
         self.steps.append(step)
         return step
 
@@ -380,6 +382,28 @@ def window_pid(hwnd) -> int:
     return pid.value
 
 
+def window_rect(hwnd) -> tuple[int, int, int, int] | None:
+    """(left, top, right, bottom) in physical pixels."""
+    r = wintypes.RECT()
+    if not hwnd or not user32.GetWindowRect(hwnd, ctypes.byref(r)):
+        return None
+    return (r.left, r.top, r.right, r.bottom)
+
+
+# UIA control types a person clicks on as a whole: Button, CheckBox, ComboBox,
+# Edit, Hyperlink, ListItem, MenuItem, RadioButton, TabItem, TreeItem,
+# DataItem, SplitButton.
+CLICKABLE_TYPES = {50000, 50002, 50003, 50004, 50005, 50007, 50011, 50013,
+                   50019, 50024, 50029, 50031}
+
+
+def clickable_ancestor(chain: list[dict]) -> dict:
+    """From the hit element up to the window: the first a person would call
+    the thing they clicked (so the text inside a button gives the button)."""
+    return next((e for e in chain if e["type"] in CLICKABLE_TYPES or e["aid"]),
+                chain[0])
+
+
 def window_center(hwnd) -> tuple[int, int] | None:
     r = wintypes.RECT()
     if not hwnd or not user32.GetWindowRect(hwnd, ctypes.byref(r)):
@@ -470,6 +494,26 @@ class _UIA:
             return (el.CurrentName or "", el.CurrentControlType)
         except Exception:
             return ("", 0)
+
+    def target_at(self, x: int, y: int) -> dict:
+        """{"name", "type", "aid"} of the clickable element under the point,
+        walking up from the hit element to (not including) the window."""
+        try:
+            el = self._uia.ElementFromPoint(wintypes.POINT(x, y))
+            walker = self._uia.ControlViewWalker
+            root = self._uia.GetRootElement()
+            chain = []
+            while el and len(chain) < 12:
+                parent = walker.GetParentElement(el)
+                if not parent or self._uia.CompareElements(parent, root):
+                    break  # el is the top-level window itself
+                chain.append({"name": el.CurrentName or "",
+                              "type": el.CurrentControlType,
+                              "aid": el.CurrentAutomationId or ""})
+                el = parent
+            return clickable_ancestor(chain) if chain else {}
+        except Exception:
+            return {}
 
     # only these control types contribute a "ในช่อง ..." label; others (e.g.
     # a top-level window) would otherwise dump the window title into the step.
@@ -790,9 +834,11 @@ class Recorder:
             _, x, y, hwnd = item
             name, ct = uia.at_point(x, y) if uia else ("", 0)
             title, app, exe = window_info(hwnd)
+            el = uia.target_at(x, y) if uia else {}
             if self._pending:
                 _discard(self._pending[6])
-            self._pending = (x, y, name, ct, title, app, self._grab(), exe)
+            self._pending = (x, y, name, ct, title, app, self._grab(), exe,
+                             el, window_rect(hwnd))
         elif kind == "commit":
             _, button, is_drag, t = item
             pend, self._pending = self._pending, None
@@ -816,7 +862,7 @@ class Recorder:
         return str(path)
 
     def _commit_click(self, button, pend, t: float):
-        x, y, name, ct, title, app, img, exe = pend
+        x, y, name, ct, title, app, img, exe, el, wr = pend
         m = self.monitors[self.selected]
         marker = {"x": x - m["left"], "y": y - m["top"],
                   "color": "#FB923C", "size": 44}
@@ -836,9 +882,16 @@ class Recorder:
                 _discard(img)
                 return
 
+        target = None
+        if exe and wr:  # where Guide Me looks for it later; the exe's name only, never its path
+            target = {"exe": Path(exe).name, "window": title,
+                      "dx": x - wr[0], "dy": y - wr[1],
+                      "name": el.get("name", ""), "type": el.get("type", 0)}
+            if el.get("aid"):
+                target["aid"] = el["aid"]
         step = self._builder.add_click(button, name, ct,
                                        app_label, image=img, marker=marker,
-                                       exe=exe)
+                                       exe=exe, target=target)
         self._last_click = step
         self._last_click_t = t
 

@@ -2,8 +2,52 @@
 import time
 
 import i18n
-from recorder import (StepBuilder, compose_click_text, control_noun, monitor_index,
-                      title_stamp)
+from recorder import (Recorder, StepBuilder, clickable_ancestor, compose_click_text,
+                      control_noun, monitor_index, title_stamp)
+
+
+def test_clickable_ancestor_walks_up():
+    chain = [{"name": "Save", "type": 50020, "aid": ""},      # Text inside
+             {"name": "Save", "type": 50000, "aid": ""},      # Button
+             {"name": "Toolbar", "type": 50021, "aid": "tb"}]
+    assert clickable_ancestor(chain)["type"] == 50000
+
+
+def test_clickable_ancestor_aid_counts():
+    chain = [{"name": "", "type": 50020, "aid": ""}, {"name": "x", "type": 50033, "aid": "pane1"}]
+    assert clickable_ancestor(chain)["aid"] == "pane1"
+
+
+def test_clickable_ancestor_falls_back_to_hit():
+    chain = [{"name": "a", "type": 50020, "aid": ""}, {"name": "b", "type": 50033, "aid": ""}]
+    assert clickable_ancestor(chain)["name"] == "a"
+
+
+def test_click_step_keeps_target():
+    b = StepBuilder()
+    t = {"exe": "notepad.exe", "window": "Untitled", "dx": 5, "dy": 6, "name": "Save", "type": 50000}
+    s = b.add_click("click", "Save", 50000, "notepad", target=t)
+    assert s["target"] == t
+    assert "target" not in StepBuilder().add_click("click", "x", 50000, "a")
+
+
+def test_write_guide_keeps_target_not_app():
+    import json, shutil, tempfile
+    from pathlib import Path
+    st = Path(tempfile.mkdtemp(prefix="stepcap-steps-"))
+    try:
+        r = Recorder.__new__(Recorder)
+        r.storage = st
+        b = StepBuilder()
+        b.add_click("click", "Save", 50000, "StepCap", exe=r"C:\Users\x\a.exe",
+                    target={"exe": "a.exe", "window": "W", "dx": 1, "dy": 2,
+                            "name": "Save", "type": 50000})
+        g = r._write_guide(b.finish())
+        s = json.loads((st / g["id"] / "guide.json").read_text(encoding="utf-8"))["steps"][0]
+        assert s["target"]["exe"] == "a.exe" and "\\" not in json.dumps(s["target"])
+        assert "app" not in s and "exe" not in s
+    finally:
+        shutil.rmtree(st, ignore_errors=True)
 
 
 def _typed(b):
