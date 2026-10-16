@@ -1,0 +1,161 @@
+{
+  "id": "getting-started",
+  "title": "ตัวอย่าง: เริ่มต้นใช้ StepCap",
+  "created": "2026-10-16T09:00:00",
+  "updated": "2026-10-16T09:00:00",
+  "bookmarked": false,
+  "app": "StepCap",
+  "app_icon": "app_icon.png",
+  "settings": {
+    "toc": false,
+    "step_count": false,
+    "created": false,
+    "updated": false,
+    "layout": "linear",
+    "click_color": "#FB923C",
+    "click_shape": "circle",
+    "click_size": 44
+  },
+  "steps": [
+    {
+      "id": "s01",
+      "kind": "note",
+      "text": "คู่มือนี้ทำด้วย StepCap เอง กด แก้ไข เพื่อลองแก้ข้อความ แก้ภาพ หรือส่งออกได้เลย ไม่ใช้แล้วลบทิ้งได้จากเมนู … ของการ์ด",
+      "image": null,
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s02",
+      "kind": "click",
+      "text": "คลิก \"+ บันทึกใหม่\" ที่มุมขวาบน",
+      "image": "step-01.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 1186,
+          "y": 28,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s03",
+      "kind": "click",
+      "text": "เลือกจอที่จะบันทึก แล้วคลิก \"เริ่มบันทึก\"",
+      "image": "step-02.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 1085,
+          "y": 164,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s04",
+      "kind": "image",
+      "text": "ทำงานในโปรแกรมที่จะสอนตามปกติ หน้าต่าง StepCap จะย่อลง ทุกคลิกและการพิมพ์จะขึ้นในแผงมุมขวาล่าง กด \"พัก\" หรือ Ctrl+Alt+P ถ้าจะทำอะไรที่ไม่อยากให้บันทึก",
+      "image": "step-03.png",
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s05",
+      "kind": "click",
+      "text": "คลิก \"หยุดบันทึก\" ที่แผง (หรือกด Ctrl+Alt+R) คู่มือจะเปิดให้แก้ไขทันที",
+      "image": "step-04.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 283,
+          "y": 130,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s06",
+      "kind": "image",
+      "text": "แก้ข้อความของแต่ละขั้นได้ในช่อง ลบขั้นที่ไม่ต้องการด้วยไอคอนถังขยะ และเรียงลำดับด้วยปุ่มขึ้น/ลง",
+      "image": "step-05.png",
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s07",
+      "kind": "click",
+      "text": "คลิก \"แก้ไขภาพ\" เพื่อใส่ลูกศร กรอบ ข้อความ เบลอข้อมูล หรือครอปภาพ",
+      "image": "step-06.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 237,
+          "y": 180,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s08",
+      "kind": "click",
+      "text": "คลิก \"ส่งออก\" แล้วเลือก Word, PDF, HTML หรือ Markdown แล้วเลือกที่บันทึกไฟล์",
+      "image": "step-07.png",
+      "crop": null,
+      "markers": [
+        {
+          "x": 1185,
+          "y": 28,
+          "size": 44,
+          "color": "#FB923C",
+          "shape": "circle"
+        }
+      ],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s09",
+      "kind": "note",
+      "text": "⚠ ก่อนส่งให้คนอื่น: ตรวจภาพทุกภาพอีกครั้ง ระบบเบลอข้อมูลอัตโนมัติอ่านได้เฉพาะตัวอักษรอังกฤษและตัวเลข และส่งเฉพาะไฟล์ที่ส่งออก อย่าส่งทั้งโฟลเดอร์ StepCap เพราะมีภาพต้นฉบับก่อนเบลอ",
+      "image": null,
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    },
+    {
+      "id": "s10",
+      "kind": "note",
+      "text": "รู้ไว้ว่ามี: เมนู Page ใช้รวมหลายคู่มือเป็นเอกสารเดียว · ถังขยะกู้คู่มือที่ลบได้ · ตั้งค่ามีที่เก็บไฟล์ ปุ่มลัด และปุ่มแสดงคำแนะนำอีกครั้ง",
+      "image": null,
+      "crop": null,
+      "markers": [],
+      "annotations": [],
+      "redactions": []
+    }
+  ]
+}

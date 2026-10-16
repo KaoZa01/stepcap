@@ -1006,7 +1006,8 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_broken_guide_listed_and_open_says_why, test_sidebar_and_cards_keyboard,
          test_home_has_no_first_run_list, test_home_tour_first_time_only,
          test_home_tour_skips_missing_sample_and_follows_resize, test_tour_postponed,
-         test_settings_replay, test_edit_tour_stops_and_skips, test_tour_esc_only_closes_tour]
+         test_settings_replay, test_edit_tour_stops_and_skips, test_tour_esc_only_closes_tour,
+         test_settings_add_sample]
 
 
 def run_all(holder):

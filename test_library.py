@@ -512,6 +512,23 @@ def test_add_sample_makes_new_copies():
         assert a and b and a != b and len(list_guides(st)) == 2
 
 
+def test_repo_sample_guide():
+    from PIL import Image
+    from library import SAMPLE_TITLE, image_kind, read_guide
+    src = Path(__file__).parent / "samples" / "getting-started"
+    g = read_guide(src)
+    assert g and g["title"] == SAMPLE_TITLE and "redact_pending" not in g
+    kinds = [s["kind"] for s in g["steps"]]
+    assert kinds.count("note") == 3 and len(kinds) == 10, kinds
+    for s in g["steps"]:
+        if s["image"]:
+            assert image_kind((src / s["image"]).read_bytes()) == "png", s["image"]
+            w, h = Image.open(src / s["image"]).size
+            assert all(0 <= m["x"] <= w and 0 <= m["y"] <= h for m in s["markers"]), s["id"]
+    assert [len(s["markers"]) for s in g["steps"] if s["kind"] == "click"] == [1, 1, 1, 1, 1]
+    assert (src / g["app_icon"]).is_file()
+
+
 def test_onboarding_settings_cleaned():
     import library as L
     with tempfile.TemporaryDirectory() as d:
