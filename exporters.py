@@ -89,3 +89,76 @@ def build_markdown(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
         for name, data in files.items():
             z.writestr(name, data)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Word (.docx)
+# ---------------------------------------------------------------------------
+THAI_FONT = "Leelawadee UI"
+
+
+def _thai_font(style) -> None:
+    """Pin a style's fonts (incl. complex script, which Thai uses) to THAI_FONT;
+    theme-font attributes would win over them, so they go."""
+    from docx.oxml.ns import qn
+    rpr = style.element.get_or_add_rPr()
+    f = rpr.find(qn("w:rFonts"))
+    if f is None:
+        f = rpr.makeelement(qn("w:rFonts"), {})
+        rpr.insert(0, f)
+    for a in ("asciiTheme", "hAnsiTheme", "cstheme", "eastAsiaTheme"):
+        f.attrib.pop(qn("w:" + a), None)
+    for a in ("ascii", "hAnsi", "cs", "eastAsia"):
+        f.set(qn("w:" + a), THAI_FONT)
+
+
+def _png_bytes(ext: str, data: bytes) -> bytes:
+    """Word shows PNG; a GIF becomes its first frame."""
+    if ext == "png":
+        return data
+    from PIL import Image
+    with Image.open(BytesIO(data)) as im:
+        out = BytesIO()
+        im.convert("RGB").save(out, "PNG")
+        return out.getvalue()
+
+
+def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
+    import docx
+    from docx.oxml.ns import qn
+    from docx.shared import Emu, Inches, Mm
+    from PIL import Image
+    doc = docx.Document()
+    for name in ("Normal", "Title", "List Number"):
+        _thai_font(doc.styles[name])
+    sec = doc.sections[0]
+    sec.page_width, sec.page_height = Mm(210), Mm(297)  # A4
+    text_w = sec.page_width - sec.left_margin - sec.right_margin
+    steps = numbered(guide)
+
+    doc.add_paragraph(guide.get("title", ""), style="Title")
+    meta = meta_line(guide)
+    if meta:
+        doc.add_paragraph(meta)
+    if (guide.get("settings") or {}).get("toc") and any(n for n, _ in steps):
+        doc.add_paragraph().add_run("สารบัญ").bold = True
+        for n, s in steps:
+            if n:
+                doc.add_paragraph(s.get("text", ""), style="List Number")
+    for n, s in steps:
+        if n is None:
+            p = doc.add_paragraph()
+            p.add_run(s.get("text", "")).italic = True
+            shd = p._p.get_or_add_pPr().makeelement(
+                qn("w:shd"), {qn("w:val"): "clear", qn("w:fill"): "F3F4F6"})
+            p._p.get_or_add_pPr().append(shd)
+            continue
+        doc.add_paragraph().add_run(f"{n}. {s.get('text', '')}").bold = True
+        if s.get("id") in images:
+            png = _png_bytes(*images[s["id"]])
+            with Image.open(BytesIO(png)) as im:
+                w = Inches(im.width / 96)
+            doc.add_picture(BytesIO(png), width=Emu(min(w, text_w)))
+    out = BytesIO()
+    doc.save(out)
+    return out.getvalue()

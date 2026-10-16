@@ -66,6 +66,52 @@ def test_md_safe_inner_name():
     assert list(_zip(build_markdown({**G, "title": ' a/b\\c?*"<>| '}, {}))) == ["a_b_c______.md"]
 
 
+def _doc(b: bytes):
+    import docx
+    return docx.Document(BytesIO(b))
+
+
+def _media(b: bytes) -> list[bytes]:
+    return [v for k, v in _zip(b).items() if k.startswith("word/media/")]
+
+
+def test_docx_text_and_images():
+    from exporters import build_docx
+    b = build_docx(G, {"a": ("png", PNG)})
+    d = _doc(b)
+    texts = [p.text for p in d.paragraphs]
+    for t in ("คู่มือ: ทดสอบ", "2 ขั้นตอน · สร้างเมื่อ 16 ต.ค. 2569", "1. คลิก *บันทึก*", "ระวัง", "2. ภาพ"):
+        assert t in texts, (t, texts)
+    assert texts.count("คลิก *บันทึก*") == 1, texts  # the TOC entry
+    assert len(d.inline_shapes) == 1
+    assert _media(b) == [PNG]
+
+
+def test_docx_thai_font():
+    from docx.oxml.ns import qn
+    from exporters import build_docx
+    rf = _doc(build_docx(G, {})).styles["Normal"].element.find(qn("w:rPr")).find(qn("w:rFonts"))
+    assert rf.get(qn("w:cs")) == "Leelawadee UI" and rf.get(qn("w:ascii")) == "Leelawadee UI"
+
+
+def test_docx_gif_first_frame():
+    from exporters import build_docx
+    frames = [Image.new("RGB", (8, 8), c) for c in ((255, 0, 0), (0, 0, 255))]
+    g = BytesIO()
+    frames[0].save(g, "GIF", save_all=True, append_images=frames[1:])
+    b = build_docx(G, {"b": ("gif", g.getvalue())})
+    assert len(_doc(b).inline_shapes) == 1
+    m = _media(b)
+    assert len(m) == 1 and m[0].startswith(b"\x89PNG")
+    assert Image.open(BytesIO(m[0])).getpixel((0, 0))[:3] == (255, 0, 0)
+
+
+def test_docx_notes_only():
+    from exporters import build_docx
+    d = _doc(build_docx({**G, "steps": [G["steps"][1]]}, {}))
+    assert len(d.inline_shapes) == 0 and "ระวัง" in [p.text for p in d.paragraphs]
+
+
 if __name__ == "__main__":
     import traceback
     sys.stdout.reconfigure(encoding="utf-8")
