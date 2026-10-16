@@ -20,17 +20,32 @@ function drawStepCanvas(canvas, img, step, maxW) {
   const c = canvas.getContext("2d");
   c.setTransform(s, 0, 0, s, -r.x * s, -r.y * s);  // draw in image pixels; the canvas edge crops
   c.drawImage(img, 0, 0);
-  for (const d of step.redactions || []) {
+  // Redactions: blur samples a copy that already has every black-out painted
+  // (a blur never brings back what was blacked out), over an opaque base (at
+  // the image edge the blurred copy is partly transparent and would show the
+  // original through). Black-outs are painted again last.
+  const reds = step.redactions || [];
+  const blacks = reds.filter(d => d.type !== "blur");
+  let src = img;
+  if (blacks.length && blacks.length < reds.length) {
+    src = document.createElement("canvas");
+    src.width = W; src.height = H;
+    const g = src.getContext("2d");
+    g.drawImage(img, 0, 0);
+    g.fillStyle = "#000";
+    for (const d of blacks) g.fillRect(d.x, d.y, d.w, d.h);
+  }
+  for (const d of reds) {
+    if (d.type !== "blur") continue;
     c.save();
     c.beginPath(); c.rect(d.x, d.y, d.w, d.h); c.clip();
-    if (d.type === "blur") {
-      c.filter = "blur(" + Math.max(16, Math.round(Math.min(d.w, d.h) / 4)) + "px)";
-      c.drawImage(img, 0, 0);
-    } else {
-      c.fillStyle = "#000"; c.fillRect(d.x, d.y, d.w, d.h);
-    }
+    c.fillStyle = "#808080"; c.fillRect(d.x, d.y, d.w, d.h);
+    c.filter = "blur(" + Math.max(16, Math.round(Math.min(d.w, d.h) / 4)) + "px)";
+    c.drawImage(src, 0, 0);
     c.restore();
   }
+  c.fillStyle = "#000";
+  for (const d of blacks) c.fillRect(d.x, d.y, d.w, d.h);
   for (const a of step.annotations || []) {
     c.save();
     c.strokeStyle = c.fillStyle = a.color || "#EF4444";
@@ -271,10 +286,12 @@ function editPage() {
   // Ctrl+V of an image (not while typing, not inside the image editor) adds an image step
   document.addEventListener("paste", e => {
     if (document.querySelector(".ied")) return;
-    if (e.target instanceof Element && e.target.closest("input, textarea")) return;
     const item = [...(e.clipboardData?.items || [])]
       .find(i => i.kind === "file" && i.type.startsWith("image/"));
     if (!item) return;
+    // in a text box, text (if any) wins; an image-only clipboard still adds a step
+    const typing = e.target instanceof Element && e.target.closest("input, textarea");
+    if (typing && e.clipboardData.types.includes("text/plain")) return;
     e.preventDefault();
     addImageStep(item.getAsFile());
   });

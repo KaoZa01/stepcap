@@ -84,6 +84,16 @@ def seed(st: Path):
          "crop": {"x": 100, "y": 50, "w": 150, "h": 100}, "markers": [],
          "redactions": [{"type": "black", "x": 220, "y": 120, "w": 80, "h": 60}]},
     ])
+    _guide(st, "edge", [
+        {"id": "e1", "kind": "click", "text": "blur at the edges", "image": "n.png",
+         "crop": None, "markers": [],
+         "redactions": [{"type": "blur", "x": 0, "y": 0, "w": 100, "h": 30},
+                        {"type": "blur", "x": 300, "y": 180, "w": 20, "h": 20}]},
+        {"id": "e2", "kind": "click", "text": "blur over black", "image": "n.png",
+         "crop": None, "markers": [],
+         "redactions": [{"type": "black", "x": 120, "y": 80, "w": 60, "h": 30},
+                        {"type": "blur", "x": 90, "y": 60, "w": 140, "h": 80}]},
+    ])
     _guide(st, "old", [  # pieces 0+1 shape: no shape, no layers, no click_shape
         {"id": "o1", "kind": "click", "text": "old step", "image": "n.png",
          "crop": None,
@@ -291,12 +301,76 @@ def test_editor_gif_tools_disabled():
     assert js("return document.querySelector('.ied') === null;") is True
 
 
+def _corr(img, box) -> float:
+    """Correlation of output pixels with the original noise inside box:
+    0 = nothing of the original left, 1 = untouched."""
+    x0, y0, w, h = box
+    a, b = [], []
+    for x in range(x0, x0 + w):
+        for y in range(y0, y0 + h):
+            a.extend(img.getpixel((x, y)))
+            b.extend(NOISE.getpixel((x, y)))
+    n = len(a)
+    ma, mb = sum(a) / n, sum(b) / n
+    va = sum((v - ma) ** 2 for v in a)
+    vb = sum((v - mb) ** 2 for v in b)
+    if va < 1e-6:
+        return 0.0
+    return sum((p - ma) * (q - mb) for p, q in zip(a, b)) / (va * vb) ** 0.5
+
+
+def test_blur_at_image_edges_hides_pixels():
+    img = png(js("const g = await getJSON('/api/guide/edge');"
+                 "return __b64(await renderStepPng(g.steps[0], 'edge'));"))
+    assert abs(_corr(img, (0, 0, 100, 30))) < 0.1, _corr(img, (0, 0, 100, 30))
+    assert abs(_corr(img, (300, 180, 20, 20))) < 0.1, _corr(img, (300, 180, 20, 20))
+
+
+def test_blur_keeps_earlier_black():
+    img = png(js("const g = await getJSON('/api/guide/edge');"
+                 "return __b64(await renderStepPng(g.steps[1], 'edge'));"))
+    assert _black(img, range(120, 180), range(80, 110))
+
+
+def test_repeated_paste_from_caption_box():
+    page("guide=noise&mode=edit")
+    n = js("return STATE.steps.length;")
+    js(_png_js("q.png") + "const box = document.querySelector('.stext'); box.focus();"
+       "const dt = new DataTransfer(); dt.items.add(file);"
+       "box.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true}));")
+    got = js("for (let i = 0; i < 60 && STATE.steps.length === " + str(n) + "; i++)"
+             "  await new Promise(r => setTimeout(r, 50));"
+             "return STATE.steps.length;")
+    assert got == n + 1, got
+
+
+def test_gif_stays_locked_after_undo():
+    js("openImageEditor('a3'); await IED.ready;")
+    assert js(_png_js("u.png") + "return await IED.replaceImage(file);") is True
+    js("document.querySelector('.ied [data-tool=blur]').click(); IED.undo(); await IED.ready;")
+    js(_PTR + "ev('pointerdown', 2, 2); ev('pointermove', 30, 25); ev('pointerup', 30, 25);")
+    assert js("return IED.step.redactions.length;") == 0
+    assert js("return IED.tool;") == "select"
+    js("closeImageEditor();")
+
+
+def test_ring_takes_custom_colour():
+    js(_OPEN + "IED.sel = {list: 'markers', item: IED.step.markers[0]}; iedOpts();")
+    js("const i = document.querySelector('.ied-opts input[type=color]');"
+       "i.value = '#123456'; i.dispatchEvent(new Event('change', {bubbles: true}));")
+    assert js("return IED.step.markers[0].color;") == "#123456"
+    js("closeImageEditor();")
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
          test_image_paste_adds_step, test_broken_image_tolerated,
          test_editor_draws_box_and_undoes, test_editor_maps_coordinates,
-         test_undo_restores_replaced_image, test_editor_gif_tools_disabled]
+         test_undo_restores_replaced_image, test_editor_gif_tools_disabled,
+         test_blur_at_image_edges_hides_pixels, test_blur_keeps_earlier_black,
+         test_repeated_paste_from_caption_box, test_gif_stays_locked_after_undo,
+         test_ring_takes_custom_colour]
 
 
 def run_all(holder):

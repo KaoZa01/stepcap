@@ -97,7 +97,11 @@ function closeImageEditor() {
 function iedLoad() {
   return new Promise(resolve => {
     const img = new Image();
-    img.onload = () => { IED.img = img; iedLayout(); iedTools(); iedOpts(); resolve(); };
+    img.onload = () => {
+      IED.img = img;
+      if (iedGif()) { IED.tool = "select"; IED.draft = null; }  // GIFs stay unedited
+      iedLayout(); iedTools(); iedOpts(); resolve();
+    };
     img.onerror = () => {
       IED.img = null;
       document.querySelector(".ied-stage").innerHTML = '<div class="imgfail">เปิดภาพนี้ไม่ได้</div>';
@@ -218,7 +222,7 @@ function iedMoveItem(it, orig, dx, dy) {
 
 // ---- pointer
 async function iedDown(e) {
-  if (!IED.img) return;
+  if (!IED.img || (iedGif() && IED.tool !== "select")) return;
   const p = IED.toImage(e.clientX, e.clientY), st = IED.step;
   if (IED.tool === "select") {
     IED.sel = iedHit(p);
@@ -265,6 +269,7 @@ function iedUp(e) {
   const d = IED.draft;
   if (!d) return;
   IED.draft = null;
+  if (iedGif()) return iedDraw();
   d.b = IED.toImage(e.clientX, e.clientY);
   const st = IED.step, t = IED.tool;
   if (t === "arrow") {
@@ -371,7 +376,8 @@ function iedOpts() {
   if (["marker", "arrow", "box", "text"].includes(kind)) {
     const cur = (it ? it.color : IED.color).toUpperCase();
     h += `<span class="muted">สี</span><div class="sw">${SWATCHES.map(c =>
-      `<button type="button" class="swatch${c === cur ? " on" : ""}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join("")}</div>`;
+      `<button type="button" class="swatch${c === cur ? " on" : ""}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join("")}</div>
+      <input type="color" class="icol" value="${cur.toLowerCase()}" title="เลือกสีเอง">`;
   }
   if (kind === "arrow" || kind === "box") h += seg("เส้น", LINE_W, it ? it.width : IED.width, "w");
   if (kind === "text") h += seg("ขนาดตัวอักษร", TEXT_SIZES, it ? it.size : IED.size, "ts");
@@ -387,6 +393,11 @@ function iedOpts() {
   row.querySelectorAll("[data-c]").forEach(b => b.onclick = () => {
     IED.color = b.dataset.c; edit(x => { x.color = b.dataset.c; });
   });
+  const icol = row.querySelector(".icol");
+  if (icol) icol.onchange = () => {
+    const c = icol.value.toUpperCase();
+    IED.color = c; edit(x => { x.color = c; });
+  };
   row.querySelectorAll("[data-w]").forEach(b => b.onclick = () => {
     IED.width = +b.dataset.w; edit(x => { x.width = +b.dataset.w; });
   });
