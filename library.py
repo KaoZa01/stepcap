@@ -15,11 +15,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+import redact
+
 DEFAULT_SETTINGS = {"toc": False, "step_count": False, "created": False,
                     "updated": False, "layout": "linear",
                     "click_color": "#FB923C", "click_shape": "circle",
                     "click_size": 44}
-DEFAULT_APP_SETTINGS = {"monitor": None, "view": "grid"}
+DEFAULT_APP_SETTINGS = {"monitor": None, "view": "grid", "redact_on": True,
+                        "redact_rules": list(redact.RULES), "redact_custom": []}
 
 MAX_IMAGE = 25 * 1024 * 1024  # bytes per uploaded image
 IMAGE_MIME = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif"}
@@ -305,13 +308,27 @@ def load_settings(storage: Path) -> dict:
         raw = {}
     if not isinstance(raw, dict):
         raw = {}
-    return {**DEFAULT_APP_SETTINGS,
-            **{k: v for k, v in raw.items() if k in DEFAULT_APP_SETTINGS}}
+    return {**DEFAULT_APP_SETTINGS, **_clean_settings(raw)}
+
+
+def _clean_settings(d: dict) -> dict:
+    """Known keys only; redact_* of the wrong shape are dropped (-> defaults)."""
+    out = {k: v for k, v in d.items() if k in DEFAULT_APP_SETTINGS}
+    if not isinstance(out.get("redact_on", True), bool):
+        del out["redact_on"]
+    for k in ("redact_rules", "redact_custom"):
+        if k in out and not (isinstance(out[k], list)
+                             and all(isinstance(x, str) for x in out[k])):
+            del out[k]
+    if "redact_rules" in out:
+        out["redact_rules"] = [r for r in redact.RULES if r in out["redact_rules"]]
+    if "redact_custom" in out:
+        out["redact_custom"] = [w.strip() for w in out["redact_custom"] if w.strip()]
+    return out
 
 
 def save_settings(storage: Path, **changes) -> dict:
-    s = {**load_settings(storage),
-         **{k: v for k, v in changes.items() if k in DEFAULT_APP_SETTINGS}}
+    s = {**load_settings(storage), **_clean_settings(changes)}
     storage.mkdir(parents=True, exist_ok=True)
     write_json_atomic(storage / "settings.json", s)
     return s

@@ -434,6 +434,18 @@ def test_colour_picked_before_drawing():
     js("closeImageEditor();")
 
 
+def test_settings_page_redact():
+    page("page=settings")
+    got = js("await new Promise(r => setTimeout(r, 500));"
+             "return [document.querySelector('#redon')?.checked,"
+             " document.querySelectorAll('#setred [data-rule]:checked').length];")
+    assert got == [True, 5], got
+    js("const b = document.querySelector('#setred [data-rule=card]'); b.checked = false;"
+       "b.dispatchEvent(new Event('change'));"
+       "await new Promise(r => setTimeout(r, 300));")
+    assert "card" not in js("return (await getJSON('/api/settings')).redact_rules;")
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,
          test_click_style_all_markers, test_text_paste_ignored,
@@ -443,7 +455,8 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original,
          test_blur_at_image_edges_hides_pixels, test_blur_keeps_earlier_black,
          test_repeated_paste_from_caption_box, test_gif_stays_locked_after_undo,
          test_ring_takes_custom_colour, test_ctrl_z_with_thai_layout,
-         test_resize_redaction_after_release, test_colour_picked_before_drawing]
+         test_resize_redaction_after_release, test_colour_picked_before_drawing,
+         test_settings_page_redact]
 
 
 def run_all(holder):

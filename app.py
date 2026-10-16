@@ -27,6 +27,7 @@ import webview
 import library
 import overlay
 import recorder
+import redact
 from recorder import Recorder, default_storage
 
 recorder.set_dpi_aware()
@@ -137,7 +138,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(rec_status())
         if p == "/api/settings":
             return self._json({**library.load_settings(STORAGE),
-                               "storage": str(STORAGE)})
+                               "storage": str(STORAGE),
+                               "redact_error": redact.available()})
         m = _GUIDE_RE.fullmatch(p)
         if m and not m.group(2):
             gid = unquote(m.group(1))
@@ -185,9 +187,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({})
         if p == "/api/settings":
             data = _obj(body)
-            if data is None or data.get("view") not in ("grid", "list"):
+            if data is None or not _settings_ok(data):
                 return self._send(400, "bad settings", "text/plain")
-            return self._json(library.save_settings(STORAGE, view=data["view"]))
+            return self._json(library.save_settings(STORAGE, **data))
         if p == "/api/open-folder":
             os.startfile(STORAGE)
             return self._json({})
@@ -247,6 +249,16 @@ def _obj(body: bytes) -> dict | None:
     except ValueError:
         return None
     return data if isinstance(data, dict) else None
+
+
+def _settings_ok(d: dict) -> bool:
+    """What the pages may change in settings.json; anything else is a 400."""
+    strs = lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v)
+    checks = {"view": lambda v: v in ("grid", "list"),
+              "redact_on": lambda v: isinstance(v, bool),
+              "redact_rules": lambda v: strs(v) and set(v) <= set(redact.RULES),
+              "redact_custom": strs}
+    return bool(d) and all(k in checks and checks[k](v) for k, v in d.items())
 
 
 REC = None

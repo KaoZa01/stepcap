@@ -301,9 +301,27 @@ def test_settings_roundtrip():
         st = Path(d)
         assert load_settings(st) == DEFAULT_APP_SETTINGS  # no file yet
         save_settings(st, view="list", bogus=1)
-        assert load_settings(st) == {"monitor": None, "view": "list"}
+        assert load_settings(st) == {**DEFAULT_APP_SETTINGS, "view": "list"}
         (st / "settings.json").write_text("{bad", encoding="utf-8")
         assert load_settings(st) == DEFAULT_APP_SETTINGS  # corrupt -> defaults
+
+
+def test_redact_settings_defaults_and_validation():
+    import redact
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        s = load_settings(st)
+        assert s["redact_on"] is True
+        assert s["redact_rules"] == list(redact.RULES)
+        assert s["redact_custom"] == []
+        save_settings(st, redact_rules=["email", "x"], redact_custom=[" acme ", ""])
+        s = load_settings(st)
+        assert s["redact_rules"] == ["email"] and s["redact_custom"] == ["acme"]
+        # junk written by hand falls back to defaults
+        (st / "settings.json").write_text('{"redact_on": "yes", "redact_rules": 5}',
+                                          encoding="utf-8")
+        s = load_settings(st)
+        assert s["redact_on"] is True and s["redact_rules"] == list(redact.RULES)
 
 
 if __name__ == "__main__":

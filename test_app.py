@@ -286,6 +286,17 @@ def test_library_routes():
     assert get("/api/guides", token=False) == 403
 
 
+def test_redact_settings_route():
+    post("/api/settings", {"redact_on": False})
+    s = get("/api/settings")
+    assert s["redact_on"] is False and "redact_error" in s, s
+    assert post("/api/settings", {"redact_on": "yes"}) == 400
+    assert post("/api/settings", {"redact_rules": ["email", "nope"]}) == 400
+    post("/api/settings", {"redact_on": True, "redact_custom": ["acme"]})
+    s = get("/api/settings")
+    assert s["redact_on"] is True and s["redact_custom"] == ["acme"] and s["view"] == "list"
+
+
 def test_ui_served():
     code, html = raw("/")
     assert code == 200 and 'src="ui/shell.js"' in html
@@ -362,7 +373,7 @@ def test_shutdown_not_blocked():
 
 TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
-         test_library_routes, test_ui_served, test_export_save_as,
+         test_library_routes, test_redact_settings_route, test_ui_served, test_export_save_as,
          test_upload_and_content_types, test_download_save_as,
          test_shutdown_not_blocked]
 

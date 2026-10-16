@@ -296,9 +296,24 @@ async function renderSettings(c) {
       <div class="muted">ยังเปลี่ยนปุ่มลัดไม่ได้</div></div>
     <div class="set"><h3>ที่เก็บคู่มือ</h3><div class="path">${esc(s.storage)}</div>
       <button type="button" class="btn" id="openf">${ICON.folder} เปิดโฟลเดอร์</button></div>
-    <div class="set"><h3>ซ่อนข้อมูลอัตโนมัติ</h3>
-      <div class="soon"><label class="switch"><input type="checkbox" disabled><span></span></label>
-        <span class="muted">เร็วๆ นี้</span></div></div>`;
+    <div class="set" id="setred"><h3>ซ่อนข้อมูลอัตโนมัติ</h3>
+      <div class="muted">เบลอข้อมูลในภาพหลังบันทึกเสร็จ และในภาพที่เพิ่มทีหลัง
+        อ่านได้เฉพาะตัวอักษรอังกฤษและตัวเลข ตรวจภาพอีกครั้งก่อนส่งให้คนอื่น</div>
+      <div class="soon"><label class="switch"><input type="checkbox" id="redon"
+        ${s.redact_on && !s.redact_error ? "checked" : ""} ${s.redact_error ? "disabled" : ""}><span></span></label>
+        <span>${s.redact_error ? "ใช้ไม่ได้บนเครื่องนี้: " + esc(s.redact_error) : "เปิดใช้"}</span></div>
+      <div class="redrules">${REDACT_RULES.map(([k, label]) => `<label class="chk">
+        <input type="checkbox" data-rule="${k}" ${s.redact_rules.includes(k) ? "checked" : ""}> ${label}</label>`).join("")}</div>
+      <div class="muted small">คำที่กำหนดเอง (บรรทัดละคำ)</div>
+      <textarea id="redwords" class="dlg-in" rows="3" spellcheck="false">${esc(s.redact_custom.join("\n"))}</textarea></div>`;
   monitorList(c.querySelector("#setmons"));
   c.querySelector("#openf").onclick = () => post("/api/open-folder");
+  const red = c.querySelector("#setred");
+  red.querySelector("#redon").onchange = e => post("/api/settings", {redact_on: e.target.checked});
+  red.querySelectorAll("[data-rule]").forEach(b => b.onchange = () => post("/api/settings",
+    {redact_rules: [...red.querySelectorAll("[data-rule]:checked")].map(x => x.dataset.rule)}));
+  red.querySelector("#redwords").onchange = e => post("/api/settings",
+    {redact_custom: e.target.value.split("\n").map(w => w.trim()).filter(Boolean)});
 }
+const REDACT_RULES = [["email", "อีเมล"], ["phone", "เบอร์โทรศัพท์"], ["thai_id", "เลขบัตรประชาชน"],
+  ["card", "เลขบัตรเครดิต/เดบิต"], ["bank", "เลขบัญชีธนาคาร"]];
