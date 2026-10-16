@@ -103,7 +103,7 @@ async function renderGuide(guide, root) {
   let html = '<div class="rg-wrap"><h1>' + E(guide.title) + "</h1>";
   if (meta.length) html += '<div class="rg-meta">' + meta.map(E).join(" · ") + "</div>";
   if (guide.description) html += '<p class="rg-desc">' + E(guide.description) + "</p>";  // a page's
-  const toc = secs.length ? secs : numbered;
+  const toc = secs.length ? secs.filter(s => s.text) : numbered;  // an untitled text block: no entry
   if (S.toc && toc.length)
     html += '<nav class="rg-toc"><b>สารบัญ</b><ol>' + toc.map(s =>
       '<li><a href="#step-' + E(s.id) + '">' + E(s.text) + "</a></li>").join("") + "</ol></nav>";
@@ -118,7 +118,7 @@ async function renderGuide(guide, root) {
       n = 0;
       div.className = "rg-secwrap";
       div.innerHTML = step.missing ? '<div class="rg-missing">' + E(step.text) + "</div>"
-        : '<h2 class="rg-sec">' + E(step.text) + "</h2>" +
+        : (step.text ? '<h2 class="rg-sec">' + E(step.text) + "</h2>" : "") +
           (step.body ? '<p class="rg-body">' + E(step.body) + "</p>" : "");
     } else if (step.kind === "note") {
       div.innerHTML = '<div class="rg-note">' + E(step.text) + "</div>";
@@ -257,6 +257,12 @@ function stepLabels(g) {
   return out;
 }
 
+// Labels sorted as the steps appear (the page's failures and the server's arrive apart).
+function byDocOrder(labels, g) {
+  const at = Object.values(stepLabels(g));
+  return [...labels].sort((a, b) => at.indexOf(a) - at.indexOf(b));
+}
+
 // Finished pictures for Markdown and Word: every PNG comes from renderStepPng,
 // so hidden parts are really gone; a GIF is only flagged (the server reads it
 // from its guide folder). Sent as raw blobs after a JSON index -- never one
@@ -316,7 +322,7 @@ async function exportDoc(kind, id, format = "html") {
   if (!r.saved) return;  // cancelled
   failed.push(...(r.missing || []));  // pictures the server couldn't use (e.g. a GIF gone)
   const notes = [];
-  if (failed.length) notes.push(`ภาพของขั้นที่ ${failed.join(", ")} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ`);
+  if (failed.length) notes.push(`ภาพของขั้นที่ ${byDocOrder(failed, doc).join(", ")} อ่านไม่ได้ ส่งออกโดยไม่มีภาพ`);
   if (r.skipped) notes.push(`ข้ามคู่มือที่ถูกลบ ${r.skipped} อัน`);
   for (const n of doc?.redact_notes || []) notes.push(n);  // a guide its pass couldn't cover
   toast(notes.length ? "บันทึกไฟล์แล้ว แต่" + notes.join(" และ") : "บันทึกไฟล์แล้ว", notes.length ? 8000 : 2500);

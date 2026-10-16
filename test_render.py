@@ -225,14 +225,34 @@ def test_render_sections():
         {"id": "sec1", "kind": "section", "text": "ข", "body": "อธิบาย"},
         {"id": "sec2", "kind": "section", "text": "ค", "gid": "old"},
         {"id": "old.x", "kind": "click", "text": "c"},
-        {"id": "sec3", "kind": "section", "text": "คู่มือนี้ถูกลบแล้ว", "missing": True}]}
+        {"id": "sec3", "kind": "section", "text": "คู่มือนี้ถูกลบแล้ว", "missing": True},
+        {"id": "sec4", "kind": "section", "text": "", "body": "ไม่มีหัวข้อ"}]}
     got = js("const r = document.createElement('div'); document.body.appendChild(r);"
              f"await renderGuide({json.dumps(doc, ensure_ascii=False)}, r);"
              "const q = s => [...r.querySelectorAll(s)].map(e => e.textContent.trim());"
              "const out = [q('.rg-sec'), q('.rg-num'), q('.rg-toc li'), q('.rg-body'), q('.rg-missing')];"
              "r.remove(); return out;")
-    assert got == [["ก", "ข", "ค"], ["1", "2", "1"], ["ก", "ข", "ค"], ["อธิบาย"],
+    assert got == [["ก", "ข", "ค"], ["1", "2", "1"], ["ก", "ข", "ค"], ["อธิบาย", "ไม่มีหัวข้อ"],
                    ["คู่มือนี้ถูกลบแล้ว"]], got
+
+
+def test_failed_labels_in_document_order():
+    # the page's own failures and the server's (GIFs) arrive separately
+    doc = {"steps": [{"id": "s0", "kind": "section", "text": "ก"},
+                     {"id": "a", "kind": "click"}, {"id": "b", "kind": "image"},
+                     {"id": "s1", "kind": "section", "text": "ข"}, {"id": "c", "kind": "click"}]}
+    got = js(f"return byDocOrder(['ข ขั้นที่ 1', 'ก ขั้นที่ 2', 'ก ขั้นที่ 1'], "
+             f"{json.dumps(doc, ensure_ascii=False)});")
+    assert got == ["ก ขั้นที่ 1", "ก ขั้นที่ 2", "ข ขั้นที่ 1"], got
+    assert js("return byDocOrder([3, 1], {steps: [{id: 'a'}, {id: 'b'}, {id: 'c'}]});") == [1, 3]
+
+
+def test_create_page_failure_reported():
+    got = js("const real = window.fetch; window.fetch = async () => new Response('', {status: 500});"
+             "let id; try { id = await newPage('x'); } finally { window.fetch = real; }"
+             "const t = [...document.querySelectorAll('.toast')].map(e => e.textContent);"
+             "document.querySelectorAll('.toast').forEach(e => e.remove()); return [id, t];")
+    assert got[0] is None and any("ไม่สำเร็จ" in t for t in got[1]), got
 
 
 def test_print_html_uses_img():
@@ -601,9 +621,9 @@ def test_page_html_skips_deleted_guide():
 
 def test_page_export_images_no_original():
     r = js("const d = await getJSON('/api/page/pg1/doc'); const x = await exportImages(d, '');"
-           "const i = x.index.findIndex(e => e.id === 'noise.a1');"
+           "const i = x.index.findIndex(e => e.id === 'noise/a1');"
            "return {ids: x.index.map(e => e.id), png: await __b64(x.blobs[i])};")
-    assert "noise.a1" in r["ids"] and "old.o1" in r["ids"], r["ids"]
+    assert "noise/a1" in r["ids"] and "old/o1" in r["ids"], r["ids"]
     assert base64.b64encode(NOISE_PNG).decode()[1000:1200] not in r["png"]
     assert _black(png(r["png"]), range(20, 80), range(20, 60))
 
@@ -676,7 +696,8 @@ def test_pasted_image_redacted():
 
 
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
-         test_render_sections,
+         test_render_sections, test_failed_labels_in_document_order,
+         test_create_page_failure_reported,
          test_export_images_no_original, test_export_images_skip_broken,
          test_html_export_names_missing_gif,
          test_bake_redaction_across_crop, test_old_guide_exports_flattened,

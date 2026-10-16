@@ -170,8 +170,8 @@ async function renderPages(c) {
   c.querySelector("#newpage").onclick = async () => {
     const title = await uiPrompt("ชื่อ Page", "");
     if (title === null || !title.trim()) return;
-    const p = await (await post("/api/pages", {title: title.trim()})).json();
-    goPage(p.id, "edit");
+    const id = await newPage(title.trim());
+    if (id) goPage(id, "edit");
   };
   c.querySelectorAll(".pcard").forEach(card => {
     const id = card.dataset.id, p = items.find(x => x.id === id);
@@ -191,12 +191,24 @@ async function renderPages(c) {
         {label: "ส่งออก", run: () => exportMenu(anchor, id, "page")},
         {label: "ลบ", danger: true, run: async () => {
           if (!(await uiConfirm("ลบ Page นี้? คู่มือข้างในไม่ถูกลบ", "ลบ"))) return;
-          toast((await post(url + "/delete")).ok ? "ลบ Page แล้ว" : FAILED);
+          let ok = false;
+          try { ok = (await post(url + "/delete")).ok; } catch { /* offline */ }
+          toast(ok ? "ลบ Page แล้ว" : FAILED);
           refresh();
         }},
       ]);
     };
   });
+}
+
+// The new page's id, or null (and says so) when it couldn't be made.
+async function newPage(title) {
+  try {
+    const r = await post("/api/pages", {title});
+    if (r.ok) return (await r.json()).id;
+  } catch { /* offline */ }
+  toast(FAILED);
+  return null;
 }
 
 async function addToPageMenu(anchor, gid) {
@@ -211,8 +223,8 @@ async function addToPageMenu(anchor, gid) {
     {label: "+ สร้าง Page ใหม่", run: async () => {
       const title = await uiPrompt("ชื่อ Page", STATE?.title || "");
       if (title === null || !title.trim()) return;
-      const p = await (await post("/api/pages", {title: title.trim()})).json();
-      add(p.id, p.title);
+      const id = await newPage(title.trim());
+      if (id) add(id, title.trim());
     }},
   ]);
 }

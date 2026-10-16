@@ -78,9 +78,15 @@ def _one_line(text: str) -> str:
     return md_escape(" ".join((text or "").split()))
 
 
+def _kept(guide: dict) -> list:
+    """numbered(), without a page's deleted guides."""
+    return [(n, s) for n, s in numbered(guide)
+            if not (s.get("kind") == "section" and s.get("missing"))]
+
+
 def build_markdown(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     """images: step id -> (ext, bytes); a step without one has no picture."""
-    steps = [(n, s) for n, s in numbered(guide) if not s.get("missing")]
+    steps = _kept(guide)
     secs = [s for _, s in steps if s.get("kind") == "section"]
     lines = [f"# {_one_line(guide.get('title', ''))}", ""]
     meta = meta_line(guide)
@@ -91,7 +97,7 @@ def build_markdown(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     toc = (guide.get("settings") or {}).get("toc")
     if toc and secs:  # a page: its guides and text blocks
         lines += ["**สารบัญ**", ""]
-        lines += [f"{i + 1}. [{_one_line(s.get('text'))}](#a{i})" for i, s in enumerate(secs)]
+        lines += [f"1. [{_one_line(s.get('text'))}](#a{i})" for i, s in enumerate(secs) if s.get("text")]
         lines.append("")
     elif toc and any(n for n, _ in steps):
         lines += ["**สารบัญ**", ""]
@@ -102,7 +108,8 @@ def build_markdown(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     for n, s in steps:
         if s.get("kind") == "section":
             sec += 1
-            lines += [f'<a id="a{sec}"></a>', f"## {_one_line(s.get('text'))}", ""]
+            if s.get("text"):  # a text block may have no title
+                lines += [f'<a id="a{sec}"></a>', f"## {_one_line(s.get('text'))}", ""]
             if s.get("body"):
                 lines += [md_escape(s["body"]), ""]
             continue
@@ -190,7 +197,7 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     sec = doc.sections[0]
     sec.page_width, sec.page_height = Mm(210), Mm(297)  # A4
     text_w = sec.page_width - sec.left_margin - sec.right_margin
-    steps = [(n, s) for n, s in numbered(guide) if not s.get("missing")]
+    steps = _kept(guide)
     secs = [s for _, s in steps if s.get("kind") == "section"]
 
     doc.add_paragraph(guide.get("title", ""), style="Title")
@@ -202,11 +209,12 @@ def build_docx(guide: dict, images: dict[str, tuple[str, bytes]]) -> bytes:
     if (guide.get("settings") or {}).get("toc") and (secs or any(n for n, _ in steps)):
         _run(doc.add_paragraph(), "สารบัญ", bold=True)
         for n, s in steps:
-            if (s.get("kind") == "section") if secs else n:
+            if (s.get("kind") == "section" and s.get("text")) if secs else n:
                 doc.add_paragraph(s.get("text") or "", style="List Number")
     for n, s in steps:
         if s.get("kind") == "section":
-            doc.add_paragraph(s.get("text") or "", style="Heading 1")
+            if s.get("text"):
+                doc.add_paragraph(s["text"], style="Heading 1")
             if s.get("body"):
                 doc.add_paragraph(s["body"])
             continue

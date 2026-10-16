@@ -385,6 +385,9 @@ def save_page(storage: Path, pid: str, data: dict) -> bool:
         return False
     keep = {k: data[k] for k in ("title", "description", "created", "settings", "sections")
             if k in data}  # not what the page screen adds for itself (guide titles)
+    seen = set()  # a guide appears once per page
+    keep["sections"] = [s for s in data["sections"] if s["type"] != "guide"
+                        or not (s["guide"] in seen or seen.add(s["guide"]))]
     try:
         write_json_atomic(f, {**keep, "id": pid, "updated": now_iso()})
     except OSError:
@@ -425,7 +428,8 @@ def list_pages(storage: Path, now: datetime | None = None) -> list[dict]:
         if p is None:
             continue
         out.append({"id": p["id"], "title": p["title"] or p["id"],
-                    "count": sum(1 for s in p["sections"] if s["type"] == "guide"),
+                    "count": sum(1 for s in p["sections"] if s["type"] == "guide"
+                                 and (storage / s["guide"] / "guide.json").is_file()),
                     "updated": p["updated"], "ago": rel_time(p["updated"], now)})
     out.sort(key=lambda p: (p["updated"], p["id"]), reverse=True)
     return out
@@ -445,7 +449,7 @@ def add_guide_to_page(storage: Path, pid: str, gid: str) -> str | None:
 def compile_page(page: dict, guides: dict[str, dict | None]) -> tuple[dict, int]:
     """The page as one guide-shaped document: a 'section' entry opens each
     guide or text block (numbering restarts after it), guide steps get ids
-    '<gid>.<sid>' and carry 'gid' so pictures load from the right folder.
+    '<gid>/<sid>' and carry 'gid' so pictures load from the right folder.
     guides maps id -> guide, or None when it was deleted."""
     settings = {**DEFAULT_PAGE_SETTINGS, **(page.get("settings") or {})}
     steps, missing, count = [], 0, 0
@@ -461,7 +465,7 @@ def compile_page(page: dict, guides: dict[str, dict | None]) -> tuple[dict, int]
             continue
         count += 1
         steps.append({**sec, "text": g.get("title", ""), "gid": gid})
-        steps += [{**st, "id": f"{gid}.{st.get('id')}", "gid": gid} for st in g.get("steps") or []]
+        steps += [{**st, "id": f"{gid}/{st.get('id')}", "gid": gid} for st in g.get("steps") or []]
     doc = {"id": page.get("id"), "title": page.get("title", ""),
            "description": page.get("description", ""),
            "created": page.get("created", ""), "updated": page.get("updated", ""),

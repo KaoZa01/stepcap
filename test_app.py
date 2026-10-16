@@ -399,7 +399,7 @@ def test_page_routes():
     page = get(f"/api/page/{pid}")
     assert page["guides"][OLD_ID]["title"] == OLD_GUIDE["title"], page
     doc = get(f"/api/page/{pid}/doc")
-    assert [s["id"] for s in doc["steps"]][:2] == ["sec0", f"{OLD_ID}.s1"] and doc["missing"] == 0, doc
+    assert [s["id"] for s in doc["steps"]][:2] == ["sec0", f"{OLD_ID}/s1"] and doc["missing"] == 0, doc
     assert post(f"/api/page/{pid}", {**page, "sections": [{"type": "guide", "guide": "../x"}]}) == 400
     assert post(f"/api/page/{pid}", {**page, "description": "ทดสอบ"}) == {}
     assert get(f"/api/page/{pid}")["description"] == "ทดสอบ"

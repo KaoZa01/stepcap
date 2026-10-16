@@ -112,6 +112,26 @@ def test_page_description_exported():
     assert "สำหรับพนักงานใหม่" in [p.text for p in _doc(build_docx(doc, {})).paragraphs]
 
 
+def test_untitled_text_block_no_empty_heading():
+    from exporters import build_docx
+    doc = {**PAGE_DOC, "steps": PAGE_DOC["steps"][:3] +
+           [{"id": "sec9", "kind": "section", "text": "", "body": "แค่ข้อความ"}]}
+    md = _zip(build_markdown(doc, {}))["เริ่มงาน.md"].decode("utf-8")
+    assert "## \n" not in md and "[](#" not in md and "แค่ข้อความ" in md, md
+    d = _doc(build_docx(doc, {}))
+    assert [p.text for p in d.paragraphs if p.style.name in ("Heading 1", "List Number")] == \
+        ["ก", "ข้อความ", "ก", "ข้อความ"]
+    assert "แค่ข้อความ" in [p.text for p in d.paragraphs]
+
+
+def test_only_deleted_sections_dropped():
+    # a plain step that happens to carry "missing" is still a step
+    from exporters import build_docx
+    doc = {**G, "steps": [{"id": "a", "kind": "click", "text": "ยังอยู่", "missing": True}]}
+    assert "ยังอยู่" in _zip(build_markdown(doc, {}))["คู่มือ_ ทดสอบ.md"].decode("utf-8")
+    assert "1. ยังอยู่" in [p.text for p in _doc(build_docx(doc, {})).paragraphs]
+
+
 def test_docx_sections():
     from exporters import build_docx
     d = _doc(build_docx(PAGE_DOC, {}))

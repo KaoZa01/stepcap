@@ -461,7 +461,8 @@ def _open_new(guide: dict):
 
 def guide_for_page(gid: str) -> dict | int:
     """GET /api/guide/<id>: 409 while its pass runs; a guide left unchecked
-    (app quit mid-pass) is checked first. Carries its note once."""
+    (app quit mid-pass) starts its pass in the background (409, so the page
+    shows its cover). Carries its note once."""
     if not library.safe_id(gid):
         return 404
     if gid in REDACT_BUSY:
@@ -469,13 +470,10 @@ def guide_for_page(gid: str) -> dict | int:
     g = library.read_guide(STORAGE / gid)
     if g is None:
         return 404
-    if g.get("redact_pending"):
-        if not _claim(gid):
-            return 409
-        _redact_pass(g)
-        g = library.read_guide(STORAGE / gid)
-        if g is None:
-            return 404
+    if g.get("redact_pending") and gid not in REDACT_NOTES:  # a note: it just ran and couldn't check
+        if _claim(gid):
+            threading.Thread(target=_redact_pass, args=(g,), daemon=True).start()
+        return 409
     note = REDACT_NOTES.pop(gid, None)
     return {**g, "redact_note": note} if note else g
 
@@ -581,15 +579,18 @@ def page_doc(pid: str) -> dict | int:
     page = library.read_page(STORAGE, pid)
     if page is None:
         return 404
-    guides, notes = {}, []
+    guides, notes, busy = {}, [], False
     for s in page["sections"]:
         if s["type"] == "guide":
             g = guide_for_page(s["guide"])
             if g == 409:
-                return 409
+                busy = True  # keep going: every pending guide starts its pass now
+                continue
             guides[s["guide"]] = g if isinstance(g, dict) else None
             if isinstance(g, dict) and g.get("redact_note"):  # never lose a redaction warning
                 notes.append(f"{g.get('title') or s['guide']}: {g['redact_note']}")
+    if busy:
+        return 409
     doc, missing = library.compile_page(page, guides)
     return {**doc, "missing": missing, "redact_notes": notes}
 

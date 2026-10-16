@@ -332,6 +332,27 @@ def test_add_guide_once():
         assert L.list_pages(st)[0]["count"] == 1
 
 
+def test_save_page_drops_duplicate_guides():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        p = L.create_page(st, "t")
+        g = {"type": "guide", "guide": "g1"}
+        assert L.save_page(st, p["id"], {**p, "sections": [g, {"type": "text"}, g]})
+        assert L.read_page(st, p["id"])["sections"] == [g, {"type": "text"}]
+
+
+def test_page_count_skips_deleted_guides():
+    import library as L
+    with tempfile.TemporaryDirectory() as d:
+        st = Path(d)
+        _seed(st, "g1")
+        p = L.create_page(st, "t")
+        L.save_page(st, p["id"], {**p, "sections": [{"type": "guide", "guide": "g1"},
+                                                    {"type": "guide", "guide": "gone"}]})
+        assert L.list_pages(st)[0]["count"] == 1
+
+
 def test_pages_hidden_from_guides():
     import library as L
     with tempfile.TemporaryDirectory() as d:
@@ -371,7 +392,7 @@ def test_compile_numbering_and_sections():
     assert [s["kind"] for s in doc["steps"]] == \
         ["section", "click", "note", "click", "section", "section", "click"]
     assert [s["id"] for s in doc["steps"]] == \
-        ["sec0", "g1.s1", "g1.n", "g1.s2", "sec1", "sec2", "g2.s1"]
+        ["sec0", "g1/s1", "g1/n", "g1/s2", "sec1", "sec2", "g2/s1"]
     assert doc["steps"][4]["body"] == "เนื้อหา" and doc["steps"][1]["gid"] == "g1"
     assert doc["steps"][0]["text"] == "ก"
 
@@ -389,6 +410,12 @@ def test_compile_ids_unique():
     page = {"id": "p1", "title": "P", "settings": {},
             "sections": [{"type": "guide", "guide": "g2"}, {"type": "guide", "guide": "g3"}]}
     doc, _ = L.compile_page(page, {"g2": _GB, "g3": {**_GB, "id": "g3"}})
+    ids = [s["id"] for s in doc["steps"]]
+    assert len(ids) == len(set(ids)), ids
+    # a folder renamed by hand may hold a dot: "a.b"+"c" must not meet "a"+"b.c"
+    page["sections"] = [{"type": "guide", "guide": "a.b"}, {"type": "guide", "guide": "a"}]
+    doc, _ = L.compile_page(page, {"a.b": {"steps": [{"id": "c", "kind": "click"}]},
+                                   "a": {"steps": [{"id": "b.c", "kind": "click"}]}})
     ids = [s["id"] for s in doc["steps"]]
     assert len(ids) == len(set(ids)), ids
 
