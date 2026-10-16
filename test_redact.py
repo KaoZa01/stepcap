@@ -228,6 +228,22 @@ def test_unchecked_guide_warns_until_checked():
     assert len(got["steps"][0]["redactions"]) == 1
 
 
+def test_page_doc_waits_for_redaction():
+    import library
+    app = _app()
+    _pending_guide(app.STORAGE, "gpage")
+    pid = library.create_page(app.STORAGE, "p")["id"]
+    library.add_guide_to_page(app.STORAGE, pid, "gpage")
+    app.REDACT_BUSY["gpage"] = [0, 1]
+    try:
+        assert app.page_doc(pid) == 409
+    finally:
+        app.REDACT_BUSY.pop("gpage", None)
+    doc = app.page_doc(pid)  # pending guide is checked on the way
+    assert doc["steps"][1]["id"] == "gpage.s1" and len(doc["steps"][1]["redactions"]) == 1, doc
+    assert app.page_doc("nope") == 404
+
+
 def test_available():
     from redact import available
     assert available() is None

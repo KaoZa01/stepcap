@@ -155,10 +155,11 @@ def edit_text(hwnd) -> str:
     return buf.value
 
 
-def export_async(gid, body, route="export"):
+def export_async(gid, body, route="export", base=None):
     out = {}
+    base = base or f"/api/guide/{gid}"
     t = __import__("threading").Thread(
-        target=lambda: out.setdefault("r", post(f"/api/guide/{gid}/{route}", body)))
+        target=lambda: out.setdefault("r", post(f"{base}/{route}", body)))
     t.start()
     return t, out
 
@@ -336,9 +337,9 @@ def test_export_save_as():
     assert target.read_text(encoding="utf-8") == "<html>สวัสดี</html>"
 
 
-def _export_to(route: str, body: bytes, target: Path, ext: str) -> dict:
+def _export_to(route: str, body: bytes, target: Path, ext: str, base=None) -> dict:
     """POST an export, type `target` into the app's own Save As, return the reply."""
-    t, out = export_async(OLD_ID, body, route=route)
+    t, out = export_async(OLD_ID, body, route=route, base=base)
     dlg = wait(lambda: save_dialog(CTX["pid"]), 30)
     assert dlg, "no Save As dialog appeared"
     box = next(e for e in child_edits(dlg) if edit_text(e).endswith(ext))
@@ -388,6 +389,38 @@ def test_export_md_and_docx():
     assert post(f"/api/guide/{OLD_ID}/export?format=nope", b"x") == 400
 
 
+def test_page_routes():
+    p = post("/api/pages", {"title": "เริ่มงาน"})
+    pid = p["id"]
+    assert pid in [x["id"] for x in get("/api/pages")]
+    assert post(f"/api/page/{pid}/add", {"guide": OLD_ID}) == {"result": "added"}
+    assert post(f"/api/page/{pid}/add", {"guide": OLD_ID}) == {"result": "exists"}
+    assert post(f"/api/page/{pid}/add", {"guide": "nope"}) == 404
+    page = get(f"/api/page/{pid}")
+    assert page["guides"][OLD_ID]["title"] == OLD_GUIDE["title"], page
+    doc = get(f"/api/page/{pid}/doc")
+    assert [s["id"] for s in doc["steps"]][:2] == ["sec0", f"{OLD_ID}.s1"] and doc["missing"] == 0, doc
+    assert post(f"/api/page/{pid}", {**page, "sections": [{"type": "guide", "guide": "../x"}]}) == 400
+    assert post(f"/api/page/{pid}", {**page, "description": "ทดสอบ"}) == {}
+    assert get(f"/api/page/{pid}")["description"] == "ทดสอบ"
+    assert get("/api/page/..%2Fx") == 404
+    assert post(f"/api/page/{pid}/delete") == {}
+    assert get(f"/api/page/{pid}") == 404
+    assert OLD_ID in [g["id"] for g in get("/api/guides")]  # the guide is untouched
+
+
+def test_page_export_md():
+    import zipfile
+    pid = post("/api/pages", {"title": "รวม"})["id"]
+    post(f"/api/page/{pid}/add", {"guide": OLD_ID})
+    z = CTX["storage"] / "page.zip"
+    r = _export_to("export?format=md", b'{"images": []}\n', z, ".zip", base=f"/api/page/{pid}")
+    assert Path(r["saved"]).resolve() == z.resolve(), r
+    with zipfile.ZipFile(z) as f:
+        md = f.read("รวม.md").decode("utf-8")
+    assert f"## {OLD_GUIDE['title']}" in md.replace("\\", ""), md
+
+
 def test_upload_and_content_types():
     png, gif = _img("PNG"), _img("GIF")
     steps_before = get(f"/api/guide/{OLD_ID}")["steps"]
@@ -435,7 +468,7 @@ TESTS = [test_old_guide_untouched, test_window_is_ours,
          test_library_routes, test_redact_settings_route, test_redact_route,
          test_ui_served, test_export_save_as,
          test_upload_and_content_types, test_download_save_as, test_export_pdf,
-         test_export_md_and_docx,
+         test_export_md_and_docx, test_page_routes, test_page_export_md,
          test_shutdown_not_blocked]
 
 if __name__ == "__main__":

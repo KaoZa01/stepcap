@@ -90,6 +90,7 @@ _UI_TYPES = {".js": "text/javascript; charset=utf-8",
 _GUIDE_RE = re.compile(
     r"/api/guide/([^/]+)(?:/(delete|meta|duplicate|export|image|download|redact))?")
 _TRASH_RE = re.compile(r"/api/trash/([^/]+)/(restore|purge)")
+_PAGE_RE = re.compile(r"/api/page/([^/]+)(?:/(doc|delete|add|export))?")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -158,6 +159,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(library.list_guides(
                 STORAGE, q=qs.get("q", [""])[0],
                 bookmarked_only=qs.get("bookmarked", [""])[0] == "1"))
+        if p == "/api/pages":
+            return self._json(library.list_pages(STORAGE))
+        m = _PAGE_RE.fullmatch(p)
+        if m and m.group(2) in (None, "doc"):
+            pid = unquote(m.group(1))
+            if m.group(2) == "doc":
+                d = page_doc(pid)
+                if d == 409:
+                    return self._send(409, "redacting", "text/plain")
+                return self._json(d) if isinstance(d, dict) else self._missing()
+            page = library.read_page(STORAGE, pid)
+            if page is None:
+                return self._missing()
+            guides = {}
+            for s in page["sections"]:
+                if s["type"] == "guide":
+                    g = library.read_guide(STORAGE / s["guide"])
+                    guides[s["guide"]] = {"title": g.get("title", "")} if g else None
+            return self._json({**page, "guides": guides})
         if p == "/api/trash":
             return self._json(library.list_trash(STORAGE))
         if p == "/api/status":
@@ -224,6 +244,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({})
         if p == "/api/trash/empty":
             return self._json({"purged": library.empty_trash(STORAGE, recycle)})
+        if p == "/api/pages":
+            data = _obj(body)
+            if data is None or not isinstance(data.get("title"), str):
+                return self._send(400, "bad page", "text/plain")
+            return self._json(library.create_page(STORAGE, data["title"].strip()))
+        m = _PAGE_RE.fullmatch(p)
+        if m and m.group(2) != "doc":
+            pid, action = unquote(m.group(1)), m.group(2)
+            if library.read_page(STORAGE, pid) is None:
+                return self._missing()
+            if action == "export":
+                fmt = qs.get("format", ["html"])[0]
+                if fmt not in EXPORT_TYPES:
+                    return self._send(400, "bad format", "text/plain")
+                return self._json(export_page(pid, fmt, body))
+            if action == "delete":
+                return self._json({}) if library.delete_page(STORAGE, pid) else self._missing()
+            data = _obj(body)
+            if data is None:
+                return self._send(400, "bad json", "text/plain")
+            if action == "add":
+                r = library.add_guide_to_page(STORAGE, pid, str(data.get("guide", "")))
+                return self._json({"result": r}) if r else self._missing()
+            return self._json({}) if library.save_page(STORAGE, pid, data) else \
+                self._send(400, "bad page", "text/plain")
         m = _TRASH_RE.fullmatch(p)
         if m:
             gid, action = unquote(m.group(1)), m.group(2)
@@ -510,13 +555,47 @@ EXPORT_TYPES = {"html": ("html", "HTML (*.html)"), "pdf": ("pdf", "PDF (*.pdf)")
 
 
 def export_guide(gid: str, fmt: str, body: bytes) -> dict:
-    """{"saved": path | None} (None = cancelled), plus "error" when it failed.
-    html/pdf: body is the export HTML. md/docx: body is the page's finished
-    pictures, {"images": {step id: {"ext", "data": base64}}}; text comes from
-    the guide on disk."""
     title = _file_title(gid)
     if title is None:
         return {"saved": None, "error": "ไม่พบคู่มือนี้"}
+    return _export(title, fmt, body, lambda: library.read_guide(STORAGE / gid), gid)
+
+
+def export_page(pid: str, fmt: str, body: bytes) -> dict:
+    """A page compiled into one document; deleted guides are left out ("skipped")."""
+    page = library.read_page(STORAGE, pid)
+    doc = page_doc(pid) if page else 404
+    if doc == 409:
+        return {"saved": None, "error": "คู่มือใน Page นี้กำลังซ่อนข้อมูลอยู่ ลองใหม่อีกครั้ง"}
+    if not isinstance(doc, dict):
+        return {"saved": None, "error": "ไม่พบ Page นี้"}
+    out = _export(exporters.safe_title(page["title"]), fmt, body, lambda: doc, "")
+    if doc["missing"] and out.get("saved"):
+        out["skipped"] = doc["missing"]
+    return out
+
+
+def page_doc(pid: str) -> dict | int:
+    """The page compiled for view/export. Guides go through guide_for_page, so
+    one being redacted makes the page wait (409) and a pending one is checked."""
+    page = library.read_page(STORAGE, pid)
+    if page is None:
+        return 404
+    guides = {}
+    for s in page["sections"]:
+        if s["type"] == "guide":
+            g = guide_for_page(s["guide"])
+            if g == 409:
+                return 409
+            guides[s["guide"]] = g if isinstance(g, dict) else None
+    doc, missing = library.compile_page(page, guides)
+    return {**doc, "missing": missing}
+
+
+def _export(title: str, fmt: str, body: bytes, load, gid: str) -> dict:
+    """{"saved": path | None} (None = cancelled), plus "error" when it failed.
+    html/pdf: body is the export HTML. md/docx: body is the finished pictures
+    (see _export_images); text comes from load() -- the guide or compiled page."""
     ext, filt = EXPORT_TYPES[fmt]
     try:
         if fmt == "html":
@@ -524,7 +603,7 @@ def export_guide(gid: str, fmt: str, body: bytes) -> dict:
         elif fmt == "pdf":
             data = print_pdf(body.decode("utf-8"))
         else:
-            guide = library.read_guide(STORAGE / gid)
+            guide = load()
             images, missing = _export_images(gid, guide, body)
             data = (exporters.build_markdown if fmt == "md" else exporters.build_docx)(guide, images)
     except Exception:
@@ -550,7 +629,12 @@ def _export_images(gid: str, guide: dict, body: bytes) -> tuple[dict, list[int]]
         assert isinstance(index, list)
     except Exception:
         index = []
-    nums = {s["id"]: n for n, s in exporters.numbered(guide) if n}
+    nums, sec = {}, None  # step id -> its number; on a page "<guide> ขั้นที่ n"
+    for n, s in exporters.numbered(guide):
+        if s.get("kind") == "section":
+            sec = s.get("text") or ""
+        elif n:
+            nums[s["id"]] = f"{sec} ขั้นที่ {n}" if sec is not None else n
     steps = {s["id"]: s for s in guide["steps"]}
     out, missing, pos = {}, [], 0
     for it in index:
@@ -559,9 +643,10 @@ def _export_images(gid: str, guide: dict, body: bytes) -> tuple[dict, list[int]]
         sid, data = it["id"], None
         if it.get("ext") == "gif":
             image = steps[sid].get("image") or ""
-            f = STORAGE / gid / image
+            home = STORAGE / (steps[sid].get("gid") or gid)
+            f = home / image
             if image.lower().endswith(".gif") and library.safe_name(image) \
-                    and f.parent == STORAGE / gid and f.is_file():
+                    and library.safe_id(home.name) and f.parent == home and f.is_file():
                 data = f.read_bytes()
             ext = "gif"
         else:
@@ -573,7 +658,7 @@ def _export_images(gid: str, guide: dict, body: bytes) -> tuple[dict, list[int]]
             out[sid] = (ext, data)
         else:
             missing.append(nums[sid])
-    return out, sorted(missing)
+    return out, missing  # in document order
 
 
 def _decodes(data: bytes) -> bool:

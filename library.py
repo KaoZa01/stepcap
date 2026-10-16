@@ -383,8 +383,10 @@ def save_page(storage: Path, pid: str, data: dict) -> bool:
     f = _page_file(storage, pid)
     if f is None or not f.is_file() or not _is_page(data):
         return False
+    keep = {k: data[k] for k in ("title", "description", "created", "settings", "sections")
+            if k in data}  # not what the page screen adds for itself (guide titles)
     try:
-        write_json_atomic(f, {**data, "id": pid, "updated": now_iso()})
+        write_json_atomic(f, {**keep, "id": pid, "updated": now_iso()})
     except OSError:
         return False
     return True
