@@ -286,5 +286,13 @@
   "ล้างครอป": "Remove crop",
   "คลิกเลือกสิ่งที่วาดไว้เพื่อย้าย แก้ หรือลบ": "Click something you drew to move, change or delete it",
   "ลากเพื่อเลือกส่วนที่จะเก็บไว้": "Drag to choose the part to keep",
-  "ลากบนภาพเพื่อวาด": "Drag on the picture to draw"
+  "ลากบนภาพเพื่อวาด": "Drag on the picture to draw",
+  "พาทำ": "Guide me",
+  "ปิดพาทำ": "Close Guide me",
+  "ปิด": "Close",
+  "เสร็จแล้ว": "All done",
+  "ตำแหน่งโดยประมาณ": "Approximate position",
+  "หาเป้าหมายไม่เจอ เปิด {app} ให้ตรงกับหน้านี้ก่อน": "Can't find this on screen. Open {app} at this screen first.",
+  "เปิดคู่มือนี้ไม่ได้": "This guide can't be opened",
+  "หยุดบันทึก หรือปิดพาทำที่เปิดอยู่ก่อน": "Stop recording or close the open Guide me first"
 }
