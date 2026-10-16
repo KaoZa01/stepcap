@@ -117,6 +117,9 @@ def seed(st: Path):
     ], settings={"click_color": ORANGE})
     (st / "zzbad").mkdir()
     (st / "zzbad" / "guide.json").write_text('{"id": "zzbad", "ti', encoding="utf-8")
+    # tours already seen and no sample guide: the older tests never meet either
+    (st / "settings.json").write_text(json.dumps({"tours_seen": ["home", "edit"], "sample_added": True}),
+                                      encoding="utf-8")
     pages = st / "_pages"
     pages.mkdir()
     for pid, title, gids in (("pg1", "รวมชุดแรก", ["noise", "old"]), ("pg2", "มีที่หาย", ["noise", "ghost"])):
@@ -156,13 +159,13 @@ _B64 = """window.__b64 = async blob => { const u = new Uint8Array(await blob.arr
   return btoa(s); }; 1"""
 
 
-def page(query: str):
+def page(query: str, width: int = 1200):
     """Open StepCap's page in a fresh window (load_url breaks evaluate_js)."""
     old = CTX.pop("win", None)
     if old:
         old.destroy()
     w = webview.create_window("render-test", CTX["base"] + "&" + query,
-                              width=1200, height=800, x=40, y=20)
+                              width=width, height=800, x=40, y=20)
     w.events.loaded.wait(20)
     time.sleep(2.5)
     w.evaluate_js(_B64)
@@ -844,6 +847,103 @@ def test_page_save_failure_warns_once():
     assert got == 1, got
 
 
+# ---------------------------------------------------------------- onboarding
+def _reset_tours():
+    js("await post('/api/settings', {tours_seen: []});")
+
+
+_NO_TOUR = "await new Promise(r => setTimeout(r, 1500)); return !!document.querySelector('.tour-box');"
+
+
+def test_home_tour_first_time_only():
+    page("page=home")
+    _reset_tours()
+    # a guide titled like the sample stands in for it (the real one comes with Task 4's files)
+    js("const r = await (await post('/api/guide/old/duplicate')).json();"
+       "await post('/api/guide/' + r.id + '/meta', {title: 'ตัวอย่าง: เริ่มต้นใช้ StepCap'});")
+    page("page=home")
+    got = js(_until("document.querySelector('.tour-box')") +
+             "const c = () => document.querySelector('.tour-count').textContent; const a = c();"
+             "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));"
+             "const b = c(); const inBox = document.querySelector('.tour-box').contains(document.activeElement);"
+             "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));"
+             "await new Promise(r => setTimeout(r, 400));"
+             "return [a, b, inBox, !!document.querySelector('.tour-box'),"
+             " (await getJSON('/api/settings')).tours_seen];")
+    assert got == ["1/3", "2/3", True, False, ["home"]], got
+    page("page=home")
+    assert js(_NO_TOUR) is False
+
+
+def test_home_tour_skips_missing_sample_and_follows_resize():
+    page("page=home")
+    _reset_tours()
+    js("for (const g of await getJSON('/api/guides')) if (g.title.startsWith('ตัวอย่าง:'))"
+       " await post('/api/guide/' + encodeURIComponent(g.id) + '/delete');")
+    page("page=home")
+    got = js(_until("document.querySelector('.tour-box')") +
+             "refresh(); await new Promise(r => setTimeout(r, 600));"
+             "return [document.querySelector('.tour-count').textContent,"
+             " document.querySelectorAll('.tour-box').length];")
+    assert got == ["1/2", 1], got
+    CTX["win"].resize(1000, 700)
+    time.sleep(0.8)
+    got = js("const t = document.getElementById('recbtn').getBoundingClientRect(),"
+             " r = document.querySelector('.tour-ring').getBoundingClientRect();"
+             "return Math.abs(r.left - (t.left - 4)) < 2 && Math.abs(r.top - (t.top - 4)) < 2;")
+    assert got is True
+    js("document.querySelector('[data-t=skip]').click();")
+
+
+def test_tour_postponed():
+    page("page=home")
+    _reset_tours()
+    page("page=home", width=700)  # narrow
+    assert js(_NO_TOUR) is False
+    page("page=home")
+    got = js(_until("document.querySelector('.tour-box')") +
+             "document.querySelector('[data-t=skip]').click(); await new Promise(r => setTimeout(r, 300));"
+             "await post('/api/settings', {tours_seen: []});"
+             "redactCover([0, 0]); await maybeTour('home'); const a = !!document.querySelector('.tour-box');"
+             "redactCover(null); const f = window.fetch; window.fetch = async (u, o) =>"
+             " String(u).startsWith('/api/status') ? new Response(JSON.stringify({recording: true})) : f(u, o);"
+             "await maybeTour('home'); window.fetch = f; return [a, !!document.querySelector('.tour-box'),"
+             " (await getJSON('/api/settings')).tours_seen];")
+    assert got == [False, False, []], got
+
+
+def test_settings_replay():
+    page("page=settings")
+    CTX["win"].evaluate_js("setTimeout(() => document.getElementById('replaytour').click(), 300); 1")
+    time.sleep(3)
+    CTX["win"].evaluate_js(_B64)
+    assert js(_until("document.querySelector('.tour-box')") +
+              "return location.search.includes('page=home') && !!document.querySelector('.tour-box');") is True
+    js("document.querySelector('[data-t=skip]').click(); await new Promise(r => setTimeout(r, 300));")
+
+
+def test_settings_add_sample():
+    page("page=settings")
+    CTX["win"].evaluate_js("setTimeout(() => document.getElementById('addsample').click(), 300); 1")
+    time.sleep(3.5)
+    CTX["win"].evaluate_js(_B64)
+    got = js(_until("typeof STATE !== 'undefined' && STATE") +
+             "return [location.search.includes('guide='), STATE.title,"
+             " [...document.querySelectorAll('.toast')].map(t => t.textContent)];")
+    assert got[0] and got[1].startswith("ตัวอย่าง:") and "เพิ่มคู่มือตัวอย่างแล้ว" in got[2], got
+
+
+def test_home_has_no_first_run_list():
+    page("page=home")
+    # an empty library used to show a 3-step list here; the tour does that job now
+    got = js(_until("document.querySelector('.intro')") +
+             "const f = window.fetch; window.fetch = async (u, o) =>"
+             " String(u).startsWith('/api/guides') ? new Response('[]') : f(u, o);"
+             "await refresh(); window.fetch = f;"
+             "return [!!document.querySelector('.intro p'), document.querySelector('.intro ol')];")
+    assert got == [True, None], got
+
+
 TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
          test_render_sections, test_failed_labels_in_document_order,
          test_create_page_failure_reported,
@@ -869,7 +969,10 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_prompt_blank_name_blocked, test_rec_menu_esc_and_one_popover,
          test_step_reorder_buttons_and_note, test_editor_is_modal_and_esc_closes,
          test_done_when_save_fails_asks, test_page_save_failure_warns_once,
-         test_broken_guide_listed_and_open_says_why, test_sidebar_and_cards_keyboard]
+         test_broken_guide_listed_and_open_says_why, test_sidebar_and_cards_keyboard,
+         test_home_has_no_first_run_list, test_home_tour_first_time_only,
+         test_home_tour_skips_missing_sample_and_follows_resize, test_tour_postponed,
+         test_settings_replay]
 
 
 def run_all(holder):

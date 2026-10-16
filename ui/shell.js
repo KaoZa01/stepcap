@@ -236,6 +236,7 @@ function drawGuides(box, items, emptyText) {
   wrap.className = VIEW === "grid" ? "cards" : "rows";
   for (const g of items) {
     const el = document.createElement("div");
+    el.dataset.id = g.id;
     el.className = (VIEW === "grid" ? "card" : "row") + (g.bookmarked ? " marked" : "") + (g.broken ? " broken" : "");
     const info = g.broken ? `<span class="muted">ไฟล์เสียหาย เปิดไม่ได้</span>`
       : `${esc(g.ago)}<span class="dot">·</span>${g.count} ขั้นตอน`;
@@ -259,19 +260,16 @@ function drawGuides(box, items, emptyText) {
 const EMPTY_ALL = "ยังไม่มีคู่มือ กด + บันทึกใหม่ เพื่อเริ่ม";
 const FAILED = "ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง";
 
-// What the app is for, said once on the home page; first run also gets the steps.
+// What the app is for, said once on the home page (the first-time tour shows how).
 const INTRO = `<p><b>StepCap</b> บันทึกการคลิกและการพิมพ์ของคุณเป็นคู่มือทีละขั้นตอนพร้อมภาพ
   แล้วส่งออกเป็น Word, PDF, HTML หรือ Markdown ให้คนอื่นทำตามได้</p>`;
-const FIRST_RUN = `<ol><li>กด <b>+ บันทึกใหม่</b> แล้วเลือก <b>เริ่มบันทึก</b> หน้าต่างนี้จะย่อลง</li>
-  <li>ทำงานในโปรแกรมที่จะสอนตามปกติ ทุกคลิกและการพิมพ์จะกลายเป็นขั้นตอน</li>
-  <li>กด <b>หยุดบันทึก</b> ที่แผงมุมขวาล่าง (หรือ Ctrl+Alt+R) คู่มือจะเปิดให้แก้ไขทันที</li></ol>`;
 
 async function renderHome(c) {
   const my = ++RENDER;
   const [all, pages] = await Promise.all([getJSON("/api/guides"), getJSON("/api/pages")]);
   if (my !== RENDER) return;
   const recents = [...all].sort((a, b) => b.bookmarked - a.bookmarked).slice(0, 8);
-  c.innerHTML = `<div class="intro">${INTRO}${all.length ? "" : FIRST_RUN}</div>
+  c.innerHTML = `<div class="intro">${INTRO}</div>
     <section><div class="sec-h"><h2>ล่าสุด</h2>${viewToggle()}</div><div id="recents"></div>
       ${all.length ? `<div class="center"><button type="button" class="btn" id="seeall">ดูทั้งหมด</button></div>` : ""}</section>
     <section><div class="sec-h"><h2>สถิติ</h2></div>
@@ -280,6 +278,7 @@ async function renderHome(c) {
   drawGuides(c.querySelector("#recents"), recents, EMPTY_ALL);
   bindViewToggle(c);
   c.querySelector("#seeall")?.addEventListener("click", () => go("all"));
+  if (PAGE === "home") maybeTour("home");
 }
 
 async function renderAll(c) {
@@ -355,8 +354,22 @@ async function renderSettings(c) {
       <div class="redrules">${REDACT_RULES.map(([k, label]) => `<label class="chk">
         <input type="checkbox" data-rule="${k}" ${s.redact_rules.includes(k) ? "checked" : ""}> ${label}</label>`).join("")}</div>
       <div class="muted small">คำที่กำหนดเอง (บรรทัดละคำ)</div>
-      <textarea id="redwords" class="dlg-in" rows="3" spellcheck="false">${esc(s.redact_custom.join("\n"))}</textarea></div>`;
+      <textarea id="redwords" class="dlg-in" rows="3" spellcheck="false">${esc(s.redact_custom.join("\n"))}</textarea></div>
+    <div class="set"><h3>การแนะนำการใช้งาน</h3>
+      <div class="muted">ดูคำแนะนำของปุ่มต่าง ๆ อีกครั้ง หรือเพิ่มคู่มือตัวอย่างกลับเข้ามาในคลัง</div>
+      <div class="padd"><button type="button" class="btn" id="replaytour">แสดงคำแนะนำอีกครั้ง</button>
+        <button type="button" class="btn" id="addsample">เพิ่มคู่มือตัวอย่างอีกครั้ง</button></div></div>`;
   monitorList(c.querySelector("#setmons"));
+  c.querySelector("#replaytour").onclick = e => busy(e.currentTarget, async () => {
+    if (await postOk("/api/settings", {tours_seen: []})) go("home"); else toastErr(FAILED);
+  });
+  c.querySelector("#addsample").onclick = e => busy(e.currentTarget, async () => {
+    try {
+      const r = await post("/api/sample");
+      if (r.ok) return nav({guide: (await r.json()).id, mode: "view", msg: "sample"});
+    } catch { /* offline */ }
+    toastErr(FAILED);
+  });
   c.querySelector("#openf").onclick = async () => { if (!(await postOk("/api/open-folder"))) toastErr(FAILED); };
   const red = c.querySelector("#setred");
   // every change saves at once and says whether it stuck
