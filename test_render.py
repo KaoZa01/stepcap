@@ -936,6 +936,27 @@ def test_settings_add_sample():
     assert got[0] and got[1].startswith("ตัวอย่าง:") and "เพิ่มคู่มือตัวอย่างแล้ว" in got[2], got
 
 
+def _click_and_reload(sel: str):
+    CTX["win"].evaluate_js(f"setTimeout(() => document.querySelector('{sel}').click(), 300); 1")
+    time.sleep(3.5)
+    CTX["win"].evaluate_js(_B64)
+
+
+def test_language_switch():
+    page("page=settings")
+    try:
+        _click_and_reload("#lang-en")
+        got = js(_until("document.querySelector('.menu button')") +
+                 "return [document.documentElement.lang, document.querySelector('.menu button').textContent,"
+                 " document.getElementById('lang-en').checked, document.querySelector('label[for=lang-th]').textContent];")
+        assert got == ["en", "Home", True, "ไทย"], got
+    finally:
+        _click_and_reload("#lang-th")
+    got = js(_until("document.querySelector('.menu button')") +
+             "return [document.documentElement.lang, document.querySelector('.menu button').textContent];")
+    assert got == ["th", "หน้าแรก"], got
+
+
 def test_tour_gives_way_to_recording_and_cover():
     # an open tour must not cover the stop buttons or sit on the redaction cover
     page("page=home")
@@ -1036,7 +1057,7 @@ TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_ht
          test_step_reorder_buttons_and_note, test_editor_is_modal_and_esc_closes,
          test_done_when_save_fails_asks, test_page_save_failure_warns_once,
          test_broken_guide_listed_and_open_says_why, test_sidebar_and_cards_keyboard,
-         test_home_has_no_first_run_list, test_home_tour_first_time_only,
+         test_home_has_no_first_run_list, test_home_tour_first_time_only, test_language_switch,
          test_home_tour_skips_missing_sample_and_follows_resize, test_tour_postponed,
          test_settings_replay, test_edit_tour_stops_and_skips, test_tour_esc_only_closes_tour,
          test_settings_add_sample, test_tour_gives_way_to_recording_and_cover, test_toast_shows_above_tour]
@@ -1060,6 +1081,8 @@ def run_all(holder):
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
+    if sys.argv[1:]:  # python test_render.py test_a test_b: only those
+        TESTS[:] = [f for f in TESTS if f.__name__ in sys.argv[1:]]
     try:
         launch()
         holder = webview.create_window("holder", html="<p>.</p>", hidden=True)

@@ -83,9 +83,9 @@ const LOGO = `<svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"
 
 // ---------------------------------------------------------------- navigation
 // msg: a toast for the next page (a page that couldn't open says why, there)
-const NAV_MSG = {guide: ["เปิดคู่มือนี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว", "err"],
-                 page: ["เปิด Page นี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว", "err"],
-                 sample: ["เพิ่มคู่มือตัวอย่างแล้ว", "ok"]};
+const NAV_MSG = {guide: [tr("เปิดคู่มือนี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว"), "err"],
+                 page: [tr("เปิด Page นี้ไม่ได้ ไฟล์อาจเสียหายหรือถูกลบไปแล้ว"), "err"],
+                 sample: [tr("เพิ่มคู่มือตัวอย่างแล้ว"), "ok"]};
 function nav(params) {
   location.search = "?" + new URLSearchParams({t: T, ...params}).toString();
 }
@@ -96,8 +96,8 @@ function _dialog(inner, okLabel, okClass, onOpen, cancelLabel) {
   return new Promise(resolve => {
     const d = document.createElement("dialog");
     d.className = "ui-dlg";
-    d.innerHTML = inner + `<div class="dlg-b"><button type="button" class="btn cancel">${esc(cancelLabel || "ยกเลิก")}</button>` +
-      `<button type="button" class="btn ${okClass || "dark"} ok">${esc(okLabel || "ตกลง")}</button></div>`;
+    d.innerHTML = inner + `<div class="dlg-b"><button type="button" class="btn cancel">${esc(cancelLabel || tr("ยกเลิก"))}</button>` +
+      `<button type="button" class="btn ${okClass || "dark"} ok">${esc(okLabel || tr("ตกลง"))}</button></div>`;
     document.body.appendChild(d);
     d.querySelector(".cancel").onclick = () => d.close("");
     d.querySelector(".ok").onclick = () => d.close("ok");
@@ -111,7 +111,7 @@ function _dialog(inner, okLabel, okClass, onOpen, cancelLabel) {
 async function uiPrompt(label, value) {
   const d = await _dialog(`<p class="dlg-t">${esc(label)}</p>` +
     `<input class="dlg-in" type="text" value="${esc(value || "")}" aria-describedby="dlghint">` +
-    `<div class="dlg-hint" id="dlghint" hidden>ต้องพิมพ์อย่างน้อย 1 ตัวอักษร</div>`, "ตกลง", "dark", dlg => {
+    `<div class="dlg-hint" id="dlghint" hidden>${tr("ต้องพิมพ์อย่างน้อย 1 ตัวอักษร")}</div>`, tr("ตกลง"), "dark", dlg => {
     const input = dlg.querySelector("input"), ok = dlg.querySelector(".ok"), hint = dlg.querySelector(".dlg-hint");
     const check = () => { ok.disabled = !input.value.trim(); return !ok.disabled; };
     input.oninput = () => { if (check()) hint.hidden = true; };
@@ -126,7 +126,7 @@ async function uiPrompt(label, value) {
 }
 
 async function uiConfirm(message, okLabel, cancelLabel) {
-  return !!(await _dialog(`<p class="dlg-t">${esc(message)}</p>`, okLabel || "ตกลง",
+  return !!(await _dialog(`<p class="dlg-t">${esc(message)}</p>`, okLabel || tr("ตกลง"),
     okLabel ? "red" : "dark", null, cancelLabel));
 }
 
@@ -134,8 +134,8 @@ async function uiConfirm(message, okLabel, cancelLabel) {
 // the user stay (saving keeps retrying) or leave without them.
 async function leaveEdit(flushFn, dropPending, to) {
   if (await flushFn()) return to();
-  if (await uiConfirm("บันทึกการแก้ไขล่าสุดไม่ได้\nไฟล์อาจถูกโปรแกรมอื่นเปิดค้างอยู่ หรือดิสก์เต็ม\n" +
-      "ถ้าอยู่หน้านี้ต่อ ระบบจะลองบันทึกใหม่ให้เรื่อย ๆ", "ออกโดยไม่บันทึก", "อยู่หน้านี้ต่อ")) {
+  if (await uiConfirm(tr("บันทึกการแก้ไขล่าสุดไม่ได้\nไฟล์อาจถูกโปรแกรมอื่นเปิดค้างอยู่ หรือดิสก์เต็ม\nถ้าอยู่หน้านี้ต่อ ระบบจะลองบันทึกใหม่ให้เรื่อย ๆ"),
+      tr("ออกโดยไม่บันทึก"), tr("อยู่หน้านี้ต่อ"))) {
     dropPending();
     to();
   }
@@ -256,7 +256,7 @@ function redactCover(r) {
     document.body.appendChild(c);
     inert(true);
   }
-  c.textContent = r[1] ? `กำลังซ่อนข้อมูล… ${r[0]}/${r[1]}` : "กำลังซ่อนข้อมูล…";
+  c.textContent = r[1] ? tr("กำลังซ่อนข้อมูล… {a}/{b}", {a: r[0], b: r[1]}) : tr("กำลังซ่อนข้อมูล…");
 }
 // timers in a minimized or hidden window are throttled; catch up when shown
 document.addEventListener("visibilitychange", () => { if (!document.hidden && TICK) TICK(); });
