@@ -1,5 +1,9 @@
 """Self-check for the pure step logic. Run: python test_steps.py"""
-from recorder import StepBuilder, compose_click_text, control_noun, monitor_index
+import time
+
+import i18n
+from recorder import (StepBuilder, compose_click_text, control_noun, monitor_index,
+                      title_stamp)
 
 
 def _typed(b):
@@ -71,12 +75,43 @@ def test_shortcut_flushes_typing():
 
 
 def test_click_text():
-    assert compose_click_text("click", "Save", "ปุ่ม", "Notepad") \
+    assert compose_click_text("click", "Save", 50000, "Notepad") \
         == 'คลิกปุ่ม "Save" ใน Notepad'
-    assert compose_click_text("rightclick", "", "", "Notepad") \
+    assert compose_click_text("rightclick", "", 0, "Notepad") \
         == "คลิกขวาใน Notepad"
-    assert compose_click_text("doubleclick", "readme.txt", control_noun(50007),
+    assert compose_click_text("doubleclick", "readme.txt", 50007,
                               "Explorer") == 'ดับเบิลคลิกรายการ "readme.txt" ใน Explorer'
+    assert control_noun(50007) == "รายการ"
+
+
+def test_english_step_text():
+    with i18n.using("en"):
+        assert compose_click_text("click", "Save", 50000, "Excel") == 'Click the "Save" button in Excel'
+        assert compose_click_text("rightclick", "Report.xlsx", 50007, "File Explorer") \
+            == 'Right-click the "Report.xlsx" item in File Explorer'
+        assert compose_click_text("doubleclick", "", 0, "Excel") == "Double-click in Excel"
+        assert compose_click_text("click", "OK", 0, "") == 'Click "OK"'
+        b = StepBuilder()
+        for ch in "hello":
+            b.add_key(ch, None, "Name", False)
+        b.add_key(None, "Enter", "Name", False)
+        b.add_key("x", None, "Password", True)
+        b.add_key(None, "Tab", "Password", True)
+        b.add_key("y", None, "", True)
+        b.add_shortcut(["Ctrl"], "C")
+        b.add_key(None, "ลูกศรซ้าย", "", False)  # i18n-ok: VK_SPECIAL's arrow name
+        b.add_shortcut(["Ctrl"], "ลูกศรขวา")  # i18n-ok
+        assert _typed(b) == ['Type "hello" in the "Name" field then press Enter',
+                             'Type a password in the "Password" field then press Tab',
+                             "Type a password", "Press Ctrl + C", "Press Left arrow",
+                             "Press Ctrl + Right arrow"], _typed(b)
+
+
+def test_title_stamp():
+    t = time.mktime((2026, 10, 16, 10, 5, 0, 0, 0, -1))
+    assert title_stamp(t) == "16 ต.ค. 2569 10:05"
+    with i18n.using("en"):
+        assert title_stamp(t) == "16 Oct 2026 10:05"
 
 
 def test_pending_text_for_live_list():
@@ -93,7 +128,7 @@ def test_pending_text_for_live_list():
 def test_click_flushes_typing():
     b = StepBuilder()
     b.add_key("x", None, "", False)
-    b.add_click("click", "OK", "ปุ่ม", "App")
+    b.add_click("click", "OK", 50000, "App")
     assert [s["kind"] for s in b.finish()] == ["type", "click"]
 
 

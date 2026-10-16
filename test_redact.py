@@ -119,6 +119,12 @@ def test_unreadable_image_raises():
         assert False, "no error"
     except RedactError:
         pass
+    import i18n
+    with i18n.using("en"):
+        try:
+            find_rects(bad, RULES, [])
+        except RedactError as e:
+            assert str(e) == "Couldn't read the picture", str(e)
 
 
 def test_redact_guide_marks_and_reports():

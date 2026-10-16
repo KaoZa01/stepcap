@@ -10,7 +10,7 @@ import i18n
 
 HERE = Path(__file__).resolve().parent
 # files whose Thai must all go through tr(); each task adds its own
-FILES: list[str] = []
+FILES: list[str] = ["recorder.py", "library.py", "exporters.py", "redact.py"]
 
 THAI = re.compile("[\u0e00-\u0e7f]")
 LIT = r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')'
@@ -116,6 +116,7 @@ if __name__ == "__main__":
     import sys
     import traceback
     sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
     for fn in fns:

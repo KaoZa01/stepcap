@@ -5,7 +5,7 @@ from io import BytesIO
 
 from PIL import Image
 
-from exporters import build_markdown, md_escape, meta_line, thai_date
+from exporters import build_markdown, doc_date, md_escape, meta_line
 
 
 def _png(color=(0, 200, 0)) -> bytes:
@@ -27,9 +27,9 @@ def _zip(b: bytes) -> dict:
         return {n: z.read(n) for n in z.namelist()}
 
 
-def test_thai_date():
-    assert thai_date("2026-10-16T10:00:00") == "16 ต.ค. 2569"
-    assert thai_date("x") == ""
+def test_doc_date():
+    assert doc_date("2026-10-16T10:00:00") == "16 ต.ค. 2569"
+    assert doc_date("x") == ""
 
 
 def test_meta_line():
@@ -153,6 +153,21 @@ def test_docx_no_template_leftovers():
     steps = [p.text for p in d.paragraphs if p.style.name == "Heading 2"]
     assert steps == ["1. คลิก *บันทึก*", "2. ภาพ"], steps  # in Word's Navigation Pane
     assert str(d.styles["Heading 1"].font.color.rgb) == "111827"
+
+
+def test_english_export_labels():
+    import i18n
+    from exporters import build_docx, doc_date
+    g = {**G, "settings": {**G["settings"], "updated": True}}
+    with i18n.using("en"):
+        assert doc_date("2026-10-16T10:00:00") == "16 Oct 2026"
+        assert meta_line(g) == "2 steps · Created 16 Oct 2026 · Last edited 16 Oct 2026"
+        md = _zip(build_markdown(g, {}))
+        assert "**Contents**" in next(v for k, v in md.items() if k.endswith(".md")).decode("utf-8")
+        b = build_docx(g, {})
+    assert "Contents" in [p.text for p in _doc(b).paragraphs]
+    styles = _zip(b)["word/styles.xml"]
+    assert b'w:val="en-US"' in styles and b'w:bidi="th-TH"' in styles
 
 
 def _doc(b: bytes):

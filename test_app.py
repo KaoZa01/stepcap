@@ -464,11 +464,11 @@ def test_shutdown_not_blocked():
 
 
 def test_sample_route_and_settings():
-    titles = lambda: [g["title"] for g in get("/api/guides")].count(library.SAMPLE_TITLE)
+    titles = lambda: [g["title"] for g in get("/api/guides")].count(library.SAMPLE_TITLES["th"])
     if (HERE / "samples" / "getting-started" / "guide.json").is_file():
         n = titles()
         assert n == 1, n  # copied once at first launch
-        assert get(f"/api/guide/{post('/api/sample')['id']}")["title"] == library.SAMPLE_TITLE
+        assert get(f"/api/guide/{post('/api/sample')['id']}")["title"] == library.SAMPLE_TITLES["th"]
         assert titles() == n + 1
     else:
         assert post("/api/sample") == 500

@@ -9,6 +9,8 @@ import math
 import re
 from typing import Iterable
 
+from i18n import tr
+
 # ---------------------------------------------------------------------------
 # Pure logic
 # ---------------------------------------------------------------------------
@@ -125,7 +127,7 @@ from pathlib import Path
 
 
 class RedactError(Exception):
-    """Message is Thai and shown to the user."""
+    """Message is in the app's language and shown to the user."""
 
 
 _LOCK = threading.Lock()  # ponytail: one OCR at a time; fine for a personal app
@@ -139,16 +141,16 @@ def _engine():
             from winrt.windows.globalization import Language
             from winrt.windows.media.ocr import OcrEngine
         except Exception:
-            raise RedactError("โหลดตัวอ่านตัวอักษรไม่ได้")
+            raise RedactError(tr("โหลดตัวอ่านตัวอักษรไม่ได้"))
         eng = OcrEngine.try_create_from_language(Language("en-US"))
         if eng is None:
-            raise RedactError("ไม่มี OCR ภาษาอังกฤษในเครื่อง")
+            raise RedactError(tr("ไม่มี OCR ภาษาอังกฤษในเครื่อง"))
         _ENGINE = eng
     return _ENGINE
 
 
 def available() -> str | None:
-    """None when OCR works here, else the Thai reason it doesn't."""
+    """None when OCR works here, else the reason it doesn't."""
     try:
         with _LOCK:
             _engine()
@@ -156,7 +158,7 @@ def available() -> str | None:
     except RedactError as e:
         return str(e)
     except Exception:  # COM / OS errors from WinRT
-        return "เปิดตัวอ่านตัวอักษรไม่ได้"
+        return tr("เปิดตัวอ่านตัวอักษรไม่ได้")
 
 
 def ocr_lines(path: Path) -> list[list[tuple[str, tuple[float, float, float, float]]]]:
@@ -167,7 +169,7 @@ def ocr_lines(path: Path) -> list[list[tuple[str, tuple[float, float, float, flo
         with Image.open(path) as im:
             img = _upright(im).convert("RGBA")
     except Exception:
-        raise RedactError("อ่านภาพไม่ได้")
+        raise RedactError(tr("อ่านภาพไม่ได้"))
     from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
     from winrt.windows.media.ocr import OcrEngine
     from winrt.windows.storage.streams import DataWriter
@@ -186,7 +188,7 @@ def ocr_lines(path: Path) -> list[list[tuple[str, tuple[float, float, float, flo
         try:
             res = asyncio.run(_recognize(eng, bmp))
         except Exception:
-            raise RedactError("อ่านตัวอักษรในภาพไม่สำเร็จ")
+            raise RedactError(tr("อ่านตัวอักษรในภาพไม่สำเร็จ"))
     return [[(wd.text, (wd.bounding_rect.x / s, wd.bounding_rect.y / s,
                         wd.bounding_rect.width / s, wd.bounding_rect.height / s))
              for wd in line.words] for line in res.lines]

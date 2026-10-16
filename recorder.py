@@ -11,64 +11,88 @@ import time
 import uuid
 from pathlib import Path
 
+import i18n
+from i18n import tr
+
 # ---------------------------------------------------------------------------
 # Pure logic (no Windows calls) -- safe to import anywhere
 # ---------------------------------------------------------------------------
 
-_THAI_MONTHS = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
-                "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
+# Step text is written in the language set when it is recorded. Thai and
+# English put the words in different orders, so each has its own tables and
+# composing code here instead of going through tr().
+_MONTHS = {"th": ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",  # i18n-ok
+                  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."],  # i18n-ok
+           "en": ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]}
 
-# UIA control type id -> Thai noun used in "คลิก<noun> \"name\"". '' = no noun.
+# UIA control type id -> noun for "Click the "name" <noun>" ('' = no noun)
 _CONTROL_NOUN = {
-    50000: "ปุ่ม",       # Button
-    50002: "ช่องเลือก",  # CheckBox
-    50003: "กล่องเลือก", # ComboBox
-    50004: "ช่อง",       # Edit
-    50005: "ลิงก์",      # Hyperlink
-    50007: "รายการ",     # ListItem
-    50011: "เมนู",       # MenuItem
-    50013: "ปุ่มตัวเลือก",# RadioButton
-    50018: "แท็บ",       # Tab
-    50019: "แท็บ",       # TabItem
-    50024: "รายการ",     # TreeItem
-    50031: "ปุ่ม",       # SplitButton
+    50000: ("ปุ่ม", "button"),             # i18n-ok Button
+    50002: ("ช่องเลือก", "checkbox"),      # i18n-ok CheckBox
+    50003: ("กล่องเลือก", "dropdown"),     # i18n-ok ComboBox
+    50004: ("ช่อง", "field"),              # i18n-ok Edit
+    50005: ("ลิงก์", "link"),              # i18n-ok Hyperlink
+    50007: ("รายการ", "item"),             # i18n-ok ListItem
+    50011: ("เมนู", "menu"),               # i18n-ok MenuItem
+    50013: ("ปุ่มตัวเลือก", "option"),     # i18n-ok RadioButton
+    50018: ("แท็บ", "tab"),                # i18n-ok Tab
+    50019: ("แท็บ", "tab"),                # i18n-ok TabItem
+    50024: ("รายการ", "item"),             # i18n-ok TreeItem
+    50031: ("ปุ่ม", "button"),             # i18n-ok SplitButton
 }
 
-# vk -> display name for special (non-character) keys
+# vk -> display name for special (non-character) keys; the arrows are named
+# in Thai here and put into English by key_label
 VK_SPECIAL = {
     0x08: "Backspace", 0x09: "Tab", 0x0D: "Enter", 0x1B: "Esc",
     0x2E: "Delete", 0x24: "Home", 0x23: "End", 0x21: "PageUp",
     0x22: "PageDown", 0x2D: "Insert",
-    0x25: "ลูกศรซ้าย", 0x26: "ลูกศรขึ้น", 0x27: "ลูกศรขวา", 0x28: "ลูกศรลง",
+    0x25: "ลูกศรซ้าย", 0x26: "ลูกศรขึ้น", 0x27: "ลูกศรขวา", 0x28: "ลูกศรลง",  # i18n-ok
 }
 for _i in range(12):  # F1..F12
     VK_SPECIAL[0x70 + _i] = f"F{_i + 1}"
+_KEY_EN = {"ลูกศรซ้าย": "Left arrow", "ลูกศรขึ้น": "Up arrow",  # i18n-ok
+           "ลูกศรขวา": "Right arrow", "ลูกศรลง": "Down arrow"}  # i18n-ok
 
-_CLICK_VERB = {"click": "คลิก", "rightclick": "คลิกขวา", "doubleclick": "ดับเบิลคลิก"}
+_CLICK_VERB = {"click": ("คลิก", "Click"), "rightclick": ("คลิกขวา", "Right-click"),  # i18n-ok
+               "doubleclick": ("ดับเบิลคลิก", "Double-click")}  # i18n-ok
 
 
-def thai_timestamp(t: float | None = None) -> str:
+def _en() -> bool:
+    return i18n.LANG == "en"
+
+
+def title_stamp(t: float | None = None) -> str:
+    """'16 Oct 2026 10:05' (Thai: short Thai month, Buddhist year) for a new
+    guide's title."""
     lt = time.localtime(t)
-    return (f"{lt.tm_mday} {_THAI_MONTHS[lt.tm_mon]} {lt.tm_year + 543} "
+    year = lt.tm_year if _en() else lt.tm_year + 543
+    return (f"{lt.tm_mday} {_MONTHS[i18n.LANG][lt.tm_mon]} {year} "
             f"{lt.tm_hour:02d}:{lt.tm_min:02d}")
 
 
 def control_noun(control_type: int) -> str:
-    return _CONTROL_NOUN.get(control_type, "")
+    return _CONTROL_NOUN.get(control_type, ("", ""))[_en()]
 
 
-def compose_click_text(kind: str, name: str, noun: str, app: str) -> str:
-    verb = _CLICK_VERB[kind]
+def key_label(key: str) -> str:
+    """A key or combo ("Ctrl + ลูกศรซ้าย") as shown in the step text."""  # i18n-ok
+    if not _en():
+        return key
+    return " + ".join(_KEY_EN.get(k, k) for k in key.split(" + "))
+
+
+def compose_click_text(kind: str, name: str, control_type: int, app: str) -> str:
+    verb, noun = _CLICK_VERB[kind][_en()], control_noun(control_type)
     name = (name or "").strip()
-    if name:
-        target = f'{noun} "{name}"' if noun else f'"{name}"'
-        s = f"{verb}{target}"
-    else:
-        s = f"{verb}ใน {app}" if app else verb
-        return s
-    if app:
-        s += f" ใน {app}"
-    return s
+    where = (f" in {app}" if _en() else f" ใน {app}") if app else ""  # i18n-ok
+    if not name:
+        return verb + where if _en() else (f"{verb}ใน {app}" if app else verb)  # i18n-ok
+    if _en():
+        target = f'the "{name}" {noun}' if noun else f'"{name}"'
+        return f"{verb} {target}{where}"
+    return f'{verb}{noun} "{name}"{where}' if noun else f'{verb}"{name}"{where}'
 
 
 def monitor_index(monitors: list[dict], name: str | None) -> int:
@@ -92,15 +116,19 @@ class _Typing:
         self.ending: str | None = None
 
     def text(self) -> str:
+        en = _en()
         if self.is_password:
-            body = (f'พิมพ์รหัสผ่านในช่อง "{self.field}"'
-                    if self.field else "พิมพ์รหัสผ่าน")
+            body = "Type a password" if en else "พิมพ์รหัสผ่าน"  # i18n-ok
+            if self.field:
+                body += f' in the "{self.field}" field' if en else f'ในช่อง "{self.field}"'  # i18n-ok
         else:
             # the field name too: some apps name an edit box after its value
-            where = f' ในช่อง "{self.mask(self.field)}"' if self.field else ""
-            body = f'พิมพ์ "{self.mask("".join(self.chars))}"{where}'
+            field = self.mask(self.field)
+            where = (f' in the "{field}" field' if en else f' ในช่อง "{field}"') if self.field else ""  # i18n-ok
+            typed = self.mask("".join(self.chars))
+            body = (f'Type "{typed}"' if en else f'พิมพ์ "{typed}"') + where  # i18n-ok
         if self.ending:
-            body += f" แล้วกด {self.ending}"
+            body += f" then press {self.ending}" if en else f" แล้วกด {self.ending}"  # i18n-ok
         return body
 
     def finish(self) -> dict:
@@ -122,14 +150,14 @@ class StepBuilder:
             self.steps.append(self._typing.finish())
             self._typing = None
 
-    def add_click(self, kind: str, name: str, noun: str, app: str,
+    def add_click(self, kind: str, name: str, control_type: int, app: str,
                   image: str | None = None, marker: dict | None = None,
                   exe: str = "") -> dict:
         self._flush()
         step = {
             "id": _new_id(),
             "kind": kind,
-            "text": compose_click_text(kind, name, noun, app),
+            "text": compose_click_text(kind, name, control_type, app),
             "app": app,
             "exe": exe,
             "image": image,
@@ -153,7 +181,7 @@ class StepBuilder:
         if special in ("Enter", "Tab"):
             if self._typing is None:
                 self.steps.append(
-                    {"id": _new_id(), "kind": "type", "text": f"กด {special}"})
+                    {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special))})
                 return
             self._typing.ending = special
             self._flush()
@@ -161,7 +189,7 @@ class StepBuilder:
         if special is not None:  # arrows / Delete / F-keys etc. pressed alone
             self._flush()
             self.steps.append(
-                {"id": _new_id(), "kind": "type", "text": f"กด {special}"})
+                {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special))})
             return
 
         # normal character
@@ -174,7 +202,7 @@ class StepBuilder:
         self._flush()
         combo = " + ".join(mods + [keyname])
         self.steps.append(
-            {"id": _new_id(), "kind": "shortcut", "text": f"กด {combo}"})
+            {"id": _new_id(), "kind": "shortcut", "text": tr("กด {k}", k=key_label(combo))})
 
     def add_note(self, text: str):
         self._flush()
@@ -585,7 +613,7 @@ class Recorder:
         now = library.now_iso()
         guide = {
             "id": gid,
-            "title": f"{app} - {thai_timestamp()}",
+            "title": f"{app} - {title_stamp()}",
             "created": now,
             "updated": now,
             "bookmarked": False,
@@ -803,12 +831,12 @@ class Recorder:
             if abs(lm["x"] - marker["x"]) < 8 and abs(lm["y"] - marker["y"]) < 8:
                 last["kind"] = "doubleclick"
                 last["text"] = compose_click_text(
-                    "doubleclick", name, control_noun(ct), app_label)
+                    "doubleclick", name, ct, app_label)
                 self._last_click_t = t
                 _discard(img)
                 return
 
-        step = self._builder.add_click(button, name, control_noun(ct),
+        step = self._builder.add_click(button, name, ct,
                                        app_label, image=img, marker=marker,
                                        exe=exe)
         self._last_click = step

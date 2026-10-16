@@ -273,7 +273,7 @@ def write(shots: dict):
                 s["markers"] = [marker]
         steps.append(s)
     (OUT / "guide.json").write_text(json.dumps(
-        {"id": "getting-started", "title": library.SAMPLE_TITLE, "created": "2026-10-16T09:00:00",
+        {"id": "getting-started", "title": library.SAMPLE_TITLES["th"], "created": "2026-10-16T09:00:00",
          "updated": "2026-10-16T09:00:00", "bookmarked": False, "app": "StepCap",
          "app_icon": "app_icon.png", "settings": dict(library.DEFAULT_SETTINGS), "steps": steps},
         ensure_ascii=False, indent=2), encoding="utf-8")

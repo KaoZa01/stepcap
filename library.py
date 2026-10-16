@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 import i18n
+from i18n import tr
 import redact
 
 DEFAULT_SETTINGS = {"toc": False, "step_count": False, "created": False,
@@ -25,7 +26,8 @@ DEFAULT_SETTINGS = {"toc": False, "step_count": False, "created": False,
 DEFAULT_APP_SETTINGS = {"monitor": None, "view": "grid", "redact_on": True,
                         "redact_rules": list(redact.RULES), "redact_custom": [],
                         "sample_added": False, "tours_seen": [], "lang": "th"}
-SAMPLE_TITLE = "ตัวอย่าง: เริ่มต้นใช้ StepCap"
+SAMPLE_TITLES = {"th": "ตัวอย่าง: เริ่มต้นใช้ StepCap",  # i18n-ok
+                 "en": "Sample: Getting started with StepCap"}
 TOURS = ("home", "edit")  # the screens that have a first-time tour
 
 MAX_IMAGE = 25 * 1024 * 1024  # bytes per uploaded image
@@ -35,7 +37,6 @@ _MAGIC = ((b"\x89PNG\r\n\x1a\n", "png"), (b"\xff\xd8\xff", "jpg"),
 _LAYERS = ("markers", "annotations", "redactions")
 
 TRASH = "_trash"
-COPY_SUFFIX = " (สำเนา)"
 
 
 def safe_name(name: str) -> bool:
@@ -156,17 +157,17 @@ def rel_time(iso: str, now: datetime) -> str:
     except (TypeError, ValueError):
         return ""
     if secs < 60:
-        return "เมื่อสักครู่"
+        return tr("เมื่อสักครู่")
     if secs < 3600:
-        return f"{int(secs // 60)} นาทีที่แล้ว"
+        return tr("{n} นาทีที่แล้ว", n=int(secs // 60))
     if secs < 86400:
-        return f"{int(secs // 3600)} ชั่วโมงที่แล้ว"
+        return tr("{n} ชั่วโมงที่แล้ว", n=int(secs // 3600))
     days = int(secs // 86400)
     if days < 30:
-        return f"{days} วันที่แล้ว"
+        return tr("{n} วันที่แล้ว", n=days)
     if days < 365:
-        return f"{days // 30} เดือนที่แล้ว"
-    return f"{days // 365} ปีที่แล้ว"
+        return tr("{n} เดือนที่แล้ว", n=days // 30)
+    return tr("{n} ปีที่แล้ว", n=days // 365)
 
 
 def _matches(g: dict, q: str) -> bool:
@@ -253,7 +254,7 @@ def duplicate_guide(storage: Path, gid: str) -> str | None:
     shutil.copytree(src, storage / new)
     g = _load_raw(storage / new)
     stamp = now_iso()
-    g.update(id=new, title=(g.get("title") or gid) + COPY_SUFFIX,
+    g.update(id=new, title=(g.get("title") or gid) + tr(" (สำเนา)"),
              created=stamp, updated=stamp, bookmarked=False)
     write_json_atomic(storage / new / "guide.json", g)
     return new
@@ -552,7 +553,7 @@ def compile_page(page: dict, guides: dict[str, dict | None]) -> tuple[dict, int]
         gid, g = s["guide"], guides.get(s["guide"])
         if g is None:
             missing += 1
-            steps.append({**sec, "text": "คู่มือนี้ถูกลบแล้ว", "missing": True, "gid": gid})
+            steps.append({**sec, "text": tr("คู่มือนี้ถูกลบแล้ว"), "missing": True, "gid": gid})
             continue
         count += 1
         steps.append({**sec, "text": g.get("title", ""), "gid": gid})
@@ -562,5 +563,5 @@ def compile_page(page: dict, guides: dict[str, dict | None]) -> tuple[dict, int]
            "created": page.get("created", ""), "updated": page.get("updated", ""),
            "settings": {**settings, "step_count": False}, "steps": steps}
     if settings.get("step_count"):
-        doc["meta_count"] = f"{count} คู่มือ"
+        doc["meta_count"] = tr("{n} คู่มือ", n=count)
     return doc, missing
