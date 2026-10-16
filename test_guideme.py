@@ -14,23 +14,64 @@ def test_pick_window_prefers_title():
     assert pick_window(W, "word.exe", "Book1") is None
 
 
+def test_pick_window_title_changed_uses_class():
+    # Explorer recorded in "Documents", replayed in "Downloads": not the taskbar
+    wins = [{"hwnd": 9, "exe": "explorer.exe", "title": "", "cls": "Shell_TrayWnd", "rect": (0, 1040, 1920, 1080)},
+            {"hwnd": 5, "exe": "explorer.exe", "title": "Downloads", "cls": "CabinetWClass", "rect": (0, 0, 800, 600)}]
+    assert pick_window(wins, "explorer.exe", "Documents", "CabinetWClass")["hwnd"] == 5
+    assert pick_window(wins, "explorer.exe", "Documents")["hwnd"] == 9  # old target: no class known
+
+
+def test_panel_width_follows_scale():
+    from guideme import panel_width
+    assert panel_width(96) == 360 and panel_width(144) == 540 and panel_width(192) == 720
+    from guideme import monitor_dpi
+    assert monitor_dpi((0, 0)) >= 96  # the primary monitor's real DPI
+
+
+def test_runner_failed_tick_clears_old_target():
+    import time
+
+    import guideme
+    shown = []
+    steps = [{"kind": "click", "markers": [{"x": 10, "y": 10, "size": 44}]},
+             {"kind": "click", "markers": [{"x": 50, "y": 50, "size": 44}]}]
+    r = guideme.Runner(steps, (0, 0), shown.append)
+    end = time.time() + 3
+    while not shown and time.time() < end:
+        time.sleep(0.05)
+    assert shown and shown[-1]["state"] == "approx"
+    real = guideme.resolve
+    guideme.resolve = lambda *a: (_ for _ in ()).throw(OSError("element gone"))
+    try:
+        r.next()
+        end = time.time() + 3
+        while r.state()["index"] != 1 and time.time() < end:
+            time.sleep(0.05)
+        time.sleep(0.2)
+        assert r.state()["state"] == "none" and shown[-1]["state"] == "none", shown[-1]
+    finally:
+        guideme.resolve = real
+        r.stop()
+
+
 def test_nearest_skips_empty():
     assert nearest([(0, 0, 0, 10), (90, 90, 110, 110), (10, 10, 30, 30)], (100, 100)) == (90, 90, 110, 110)
     assert nearest([(5, 5, 5, 5)], (0, 0)) is None
 
 
 def test_resolve_element_on_negative_monitor():
-    r = resolve(STEP, lambda e, t: W[1], lambda h, a, n, ty: [(-1890, 20, -1870, 40), (0, 0, 9, 9)], (0, 0))
+    r = resolve(STEP, lambda *a: W[1], lambda h, a, n, ty: [(-1890, 20, -1870, 40), (0, 0, 9, 9)], (0, 0))
     assert r["state"] == "element" and r["rect"] == (-1890, 20, -1870, 40) and r["shape"] == "box"
 
 
 def test_resolve_approx_when_element_missing():
-    r = resolve(STEP, lambda e, t: W[0], lambda *a: [], (0, 0))
+    r = resolve(STEP, lambda *a: W[0], lambda *a: [], (0, 0))
     assert r["state"] == "approx" and r["shape"] == "circle" and r["rect"] == (118, 58, 162, 102)
 
 
 def test_resolve_missing_window():
-    r = resolve(STEP, lambda e, t: None, lambda *a: [], (0, 0))
+    r = resolve(STEP, lambda *a: None, lambda *a: [], (0, 0))
     assert r["state"] == "missing" and r["app"] == "excel"
 
 

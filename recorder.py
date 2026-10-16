@@ -300,6 +300,7 @@ user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND,
 user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
 user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.WindowFromPoint.restype = wintypes.HWND
 user32.WindowFromPoint.argtypes = [wintypes.POINT]
 user32.GetAncestor.restype = wintypes.HWND
@@ -380,6 +381,13 @@ def window_pid(hwnd) -> int:
     if hwnd:
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     return pid.value
+
+
+def window_class(hwnd) -> str:
+    buf = ctypes.create_unicode_buffer(256)
+    if hwnd:
+        user32.GetClassNameW(hwnd, buf, 256)
+    return buf.value
 
 
 def window_rect(hwnd) -> tuple[int, int, int, int] | None:
@@ -853,7 +861,7 @@ class Recorder:
             if self._pending:
                 _discard(self._pending[6])
             self._pending = (x, y, name, ct, title, app, self._grab(), exe,
-                             el, window_rect(hwnd))
+                             el, window_rect(hwnd), window_class(hwnd))
         elif kind == "commit":
             _, button, is_drag, t = item
             pend, self._pending = self._pending, None
@@ -877,7 +885,7 @@ class Recorder:
         return str(path)
 
     def _commit_click(self, button, pend, t: float):
-        x, y, name, ct, title, app, img, exe, el, wr = pend
+        x, y, name, ct, title, app, img, exe, el, wr, cls = pend
         m = self.monitors[self.selected]
         marker = {"x": x - m["left"], "y": y - m["top"],
                   "color": "#FB923C", "size": 44}
@@ -899,7 +907,7 @@ class Recorder:
 
         target = None
         if exe and wr:  # where Guide Me looks for it later; the exe's name only, never its path
-            target = {"exe": Path(exe).name, "window": title,
+            target = {"exe": Path(exe).name, "window": title, "cls": cls,
                       "dx": x - wr[0], "dy": y - wr[1],
                       "name": el.get("name", ""), "type": el.get("type", 0)}
             if el.get("aid"):

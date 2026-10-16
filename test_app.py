@@ -537,15 +537,18 @@ def test_guideme_routes():
 
 def test_guideme_docks_and_restores():
     # an AppBar on the primary monitor (the old guide has no target), then gone
+    import guideme
+    R.set_dpi_aware()
     before = work_area()
+    pw = guideme.panel_width(guideme.monitor_dpi((before[0], before[1])))  # 360 at 100%, wider when scaled
     assert post(f"/api/guideme/start?gid={OLD_ID}") == {}
     h = None
     try:
         h = wait(lambda: find_win(CTX["pid"], "StepCap Guide Me"), 15)
         assert h, "panel window never appeared"
-        r = wait(lambda: (w := R.window_rect(h)) and w[2] - w[0] == 360 and w, 10)
-        assert r and r[2] == before[2], r
-        assert wait(lambda: work_area() == (before[0], before[1], before[2] - 360, before[3]), 5)
+        r = wait(lambda: (w := R.window_rect(h)) and w[2] - w[0] == pw and w, 10)
+        assert r and r[2] == before[2], (r, pw)
+        assert wait(lambda: work_area() == (before[0], before[1], before[2] - pw, before[3]), 5)
         assert affinity(h) == 0x11
         assert post(f"/api/guideme/start?gid={OLD_ID}") == 409   # one at a time
         post("/api/start")                                        # recording stays off

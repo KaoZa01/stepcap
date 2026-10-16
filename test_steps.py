@@ -31,6 +31,20 @@ def test_click_step_keeps_target():
     assert "target" not in StepBuilder().add_click("click", "x", 50000, "a")
 
 
+def test_commit_click_records_window_class():
+    r = Recorder.__new__(Recorder)
+    r._builder = StepBuilder()
+    r.monitors = [{"left": 0, "top": 0}]
+    r.selected = 0
+    r._last_click = None
+    pend = (110, 220, "Save", 50000, "Docs", "explorer", None, r"C:\Windows\explorer.exe",
+            {"name": "Save", "type": 50000, "aid": ""}, (100, 200, 900, 800), "CabinetWClass")
+    r._commit_click("click", pend, 1.0)
+    t = r._builder.steps[0]["target"]
+    assert t == {"exe": "explorer.exe", "window": "Docs", "cls": "CabinetWClass", "dx": 10,
+                 "dy": 20, "name": "Save", "type": 50000}, t
+
+
 def test_write_guide_keeps_target_not_app():
     import json, shutil, tempfile
     from pathlib import Path

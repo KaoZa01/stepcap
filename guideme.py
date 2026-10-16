@@ -19,10 +19,13 @@ CLICKS = {"click", "rightclick", "doubleclick"}
 MARKER = 44  # a circle the size of a recorded click marker
 
 
-def pick_window(wins: list[dict], exe: str, title: str) -> dict | None:
-    """The window of that exe (top-most first), the one titled title if any."""
+def pick_window(wins: list[dict], exe: str, title: str, cls: str = "") -> dict | None:
+    """The window of that exe (top-most first): the one titled title, else the
+    one of the recorded window class (titles change: folder, tab, document)."""
     same = [w for w in wins if w["exe"].lower() == exe.lower()]
-    return next((w for w in same if w["title"] == title), same[0] if same else None)
+    return next((w for w in same if w["title"] == title),
+                next((w for w in same if cls and w.get("cls") == cls),
+                     same[0] if same else None))
 
 
 def nearest(rects: list[tuple], pt: tuple[int, int]) -> tuple | None:
@@ -51,7 +54,7 @@ def resolve(step: dict, find_window, find_elements, origin: tuple[int, int]) -> 
             return res
         return {**res, "state": "approx", "shape": "circle",
                 "rect": _circle(origin[0] + m["x"], origin[1] + m["y"], m.get("size", MARKER))}
-    w = find_window(t["exe"], t.get("window", ""))
+    w = find_window(t["exe"], t.get("window", ""), t.get("cls", ""))
     if w is None:
         return {**res, "state": "missing", "app": Path(t["exe"]).stem}
     pt = (w["rect"][0] + t["dx"], w["rect"][1] + t["dy"])
@@ -109,6 +112,11 @@ PANEL_W = 360
 PANEL_TITLE = "StepCap Guide Me"  # also how the app finds the panel's window
 
 
+def panel_width(dpi: int) -> int:
+    """PANEL_W at 100% scale, in the monitor's physical pixels."""
+    return round(PANEL_W * dpi / 96)
+
+
 def panel_rect(mon: tuple, width: int = PANEL_W) -> tuple:
     """The side panel's strip at the right edge of a monitor."""
     return (mon[2] - width, mon[1], mon[2], mon[3])
@@ -157,6 +165,22 @@ def dock_right(hwnd, mon: tuple, width: int = PANEL_W) -> tuple | None:
     return r
 
 
+def monitor_dpi(pt: tuple[int, int]) -> int:
+    """The DPI of the monitor at pt (96 = 100%)."""
+    MONITOR_DEFAULTTOPRIMARY, MDT_EFFECTIVE_DPI = 1, 0
+    recorder.user32.MonitorFromPoint.restype = wintypes.HMONITOR
+    recorder.user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+    hmon = recorder.user32.MonitorFromPoint(wintypes.POINT(*pt), MONITOR_DEFAULTTOPRIMARY)
+    x, y = wintypes.UINT(), wintypes.UINT()
+    try:
+        if ctypes.windll.shcore.GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI,
+                                                 ctypes.byref(x), ctypes.byref(y)) == 0:
+            return x.value
+    except Exception:
+        pass
+    return 96
+
+
 def undock(hwnd):
     if hwnd:
         _shell32.SHAppBarMessage(_ABM_REMOVE, ctypes.byref(_abd(hwnd)))
@@ -169,7 +193,16 @@ def monitor_of(mons: list[dict], pt: tuple[int, int]) -> dict:
                 next((m for m in mons if m["primary"]), mons[0]))
 
 
-_EXE: dict[int, str] = {}  # hwnd -> exe name; a window never changes process
+_EXE: dict[tuple, str] = {}  # (hwnd, pid) -> exe name
+_dwm = ctypes.windll.dwmapi
+recorder.user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+window_class = recorder.window_class
+
+
+def _cloaked(h) -> bool:
+    v = wintypes.DWORD()
+    return _dwm.DwmGetWindowAttribute(wintypes.HWND(h), 14, ctypes.byref(v),  # DWMWA_CLOAKED
+                                      ctypes.sizeof(v)) == 0 and v.value != 0
 
 
 def top_windows(skip_own: bool = True) -> list[dict]:
@@ -178,13 +211,17 @@ def top_windows(skip_own: bool = True) -> list[dict]:
     u = recorder.user32
 
     def _cb(h, _):
-        if u.IsWindowVisible(h) and not u.IsIconic(h) \
+        if u.IsWindowVisible(h) and not u.IsIconic(h) and not _cloaked(h) \
+                and not u.GetWindowLongW(h, -20) & 0x80 \
                 and not (skip_own and recorder.window_pid(h) == me):
+            # (skipped: tool windows like the taskbar, and windows on other
+            # virtual desktops or suspended, which are "cloaked")
             r = recorder.window_rect(h)
             if r and r[2] > r[0] and r[3] > r[1]:
-                if h not in _EXE:
-                    _EXE[h] = Path(recorder.window_info(h)[2]).name
-                wins.append({"hwnd": h, "exe": _EXE[h],
+                key = (h, recorder.window_pid(h))  # hwnds get reused
+                if key not in _EXE:
+                    _EXE[key] = Path(recorder.window_info(h)[2]).name
+                wins.append({"hwnd": h, "exe": _EXE[key], "cls": window_class(h),
                              "title": recorder.window_title(h), "rect": r})
         return True
 
@@ -204,10 +241,13 @@ class UIAFind:
         found = root.FindAll(self._DESCENDANTS, cond)
         out = []
         for i in range(found.Length if found else 0):
-            el = found.GetElement(i)
-            if el.CurrentIsOffscreen:
-                continue
-            r = el.CurrentBoundingRectangle
+            try:
+                el = found.GetElement(i)
+                if el.CurrentIsOffscreen:
+                    continue
+                r = el.CurrentBoundingRectangle
+            except Exception:
+                continue  # gone between the search and the read (a closed dialog)
             out.append((r.left, r.top, r.right, r.bottom))
         return out
 
@@ -286,7 +326,10 @@ class Runner:
             try:
                 self._tick(uia)
             except Exception:
-                pass  # a window closing mid-search; the next tick tries again
+                # a window closing mid-search: never leave the last step's
+                # outline up (a click there would skip this step); retry next tick
+                self._res = {"state": "none", "shape": None, "rect": None, "app": ""}
+                self._highlight(self._res)
 
     def _tick(self, uia):
         s = self.session
@@ -295,10 +338,10 @@ class Runner:
         else:
             wins = None
 
-            def find_window(exe, title):
+            def find_window(exe, title, cls):
                 nonlocal wins
                 wins = top_windows() if wins is None else wins
-                return pick_window(wins, exe, title)
+                return pick_window(wins, exe, title, cls)
 
             find = uia.elements if uia else (lambda *a: [])
             self._res = resolve(s.steps[s.index], find_window, find, self._origin)
