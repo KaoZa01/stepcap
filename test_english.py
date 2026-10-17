@@ -122,6 +122,11 @@ def test_guide_view_and_export_menu():
     scan("export menu", _click("#exp"))
 
 
+def test_guideme_panel():
+    page("guideme=g1", width=360)
+    scan("guide me panel", R._until("document.querySelector('.gm-card.on')"))
+
+
 def test_guide_edit_tour_pops_and_dialogs():
     page("guide=g1&mode=edit")
     _walk_tour("edit", 5)
@@ -142,7 +147,7 @@ def test_image_editor_tools():
         scan(f"image editor: {tool}", _click(f"[data-tool={tool}]"))
 
 
-TESTS = [test_home_and_tour, test_library_views_and_menus, test_pages, test_trash_and_settings,
+TESTS = [test_guideme_panel, test_home_and_tour, test_library_views_and_menus, test_pages, test_trash_and_settings,
          test_guide_view_and_export_menu, test_guide_edit_tour_pops_and_dialogs, test_image_editor_tools]
 
 

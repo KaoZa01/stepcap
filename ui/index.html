@@ -339,6 +339,30 @@
     .gbody.edit{padding-right:64px}
     .egrid{grid-template-columns:repeat(2,minmax(0,1fr))}
   }
+  /* Guide Me side panel (its own narrow window) */
+  .gm{display:flex;flex-direction:column;height:100vh;background:var(--side)}
+  .gm-top{display:flex;align-items:center;gap:8px;padding:12px 12px 12px 16px;background:#fff;border-bottom:1px solid var(--line)}
+  .gm-title{flex:1;min-width:0;font-size:15px;font-weight:600;overflow-wrap:anywhere}
+  .gm-list{flex:1;overflow-y:auto;margin:0;padding:12px;list-style:none;display:flex;flex-direction:column;gap:8px}
+  .gm-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer}
+  .gm-card:hover{background:var(--hover)}
+  .gm-card.on{cursor:default;background:#fff;box-shadow:0 2px 8px rgba(17,24,39,.08);padding:14px}
+  .gm-head{display:flex;gap:10px;align-items:flex-start}
+  .gm-num{flex:0 0 auto;min-width:26px;height:26px;border-radius:13px;background:var(--hover);color:var(--ink-2);
+    display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600}
+  .gm-card.on .gm-num{background:var(--accent);color:#3a1d02}
+  .gm-text{min-width:0;overflow-wrap:anywhere;color:var(--ink-2)}
+  .gm-card:not(.on) .gm-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gm-card.on .gm-text{color:var(--ink);font-weight:600}
+  .gm-status{margin:10px 0 0;font-size:13px;color:var(--muted)}
+  .gm-status.warn{color:var(--danger-ink);background:var(--danger-bg);border-radius:8px;padding:8px 10px}
+  .gm-pic{position:relative;margin:10px -8px 0}
+  .gm-img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:8px;cursor:zoom-in}
+  .gm-zoom{position:absolute;top:6px;right:6px;background:#fff;border:1px solid var(--line-strong);box-shadow:0 1px 3px rgba(17,24,39,.15)}
+  .gm-pic:has(.gm-zoom[aria-pressed="true"]) .gm-img{cursor:zoom-out}
+  .gm-done .btn{margin-top:12px}
+  .gm-foot{display:flex;justify-content:space-between;gap:8px;padding:12px;background:#fff;border-top:1px solid var(--line);flex-wrap:wrap}
+  .gm-empty{padding:16px}
 </style>
 </head>
 <body>
@@ -350,6 +374,7 @@
 <script src="ui/shell.js"></script>
 <script src="ui/guide.js"></script>
 <script src="ui/editor.js"></script>
+<script src="ui/guideme.js"></script>
 <script>boot();</script>
 </body>
 </html>

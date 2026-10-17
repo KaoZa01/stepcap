@@ -133,7 +133,15 @@ class _Typing:
 
     def finish(self) -> dict:
         kind = "password" if self.is_password else "type"
-        return {"id": _new_id(), "kind": kind, "text": self.text()}
+        # what Guide Me waits for: the typed text, unless it is a password or
+        # was masked (then Enter/Tab), and the key that ended it
+        expect = {}
+        typed = "".join(self.chars)
+        if typed and not self.is_password and self.mask(typed) == typed:
+            expect["typed"] = typed
+        if self.ending:
+            expect["ending"] = self.ending
+        return {"id": _new_id(), "kind": kind, "text": self.text(), "expect": expect}
 
 
 class StepBuilder:
@@ -152,7 +160,7 @@ class StepBuilder:
 
     def add_click(self, kind: str, name: str, control_type: int, app: str,
                   image: str | None = None, marker: dict | None = None,
-                  exe: str = "") -> dict:
+                  exe: str = "", target: dict | None = None) -> dict:
         self._flush()
         step = {
             "id": _new_id(),
@@ -164,6 +172,8 @@ class StepBuilder:
             "crop": None,
             "markers": [marker] if marker else [],
         }
+        if target:
+            step["target"] = target
         self.steps.append(step)
         return step
 
@@ -181,7 +191,8 @@ class StepBuilder:
         if special in ("Enter", "Tab"):
             if self._typing is None:
                 self.steps.append(
-                    {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special))})
+                    {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special)),
+                     "expect": {"key": special}})
                 return
             self._typing.ending = special
             self._flush()
@@ -189,7 +200,8 @@ class StepBuilder:
         if special is not None:  # arrows / Delete / F-keys etc. pressed alone
             self._flush()
             self.steps.append(
-                {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special))})
+                {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special)),
+                 "expect": {"key": special}})
             return
 
         # normal character
@@ -202,7 +214,8 @@ class StepBuilder:
         self._flush()
         combo = " + ".join(mods + [keyname])
         self.steps.append(
-            {"id": _new_id(), "kind": "shortcut", "text": tr("กด {k}", k=key_label(combo))})
+            {"id": _new_id(), "kind": "shortcut", "text": tr("กด {k}", k=key_label(combo)),
+             "expect": {"keys": combo}})
 
     def add_note(self, text: str):
         self._flush()
@@ -298,6 +311,7 @@ user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND,
 user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
 user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.WindowFromPoint.restype = wintypes.HWND
 user32.WindowFromPoint.argtypes = [wintypes.POINT]
 user32.GetAncestor.restype = wintypes.HWND
@@ -378,6 +392,35 @@ def window_pid(hwnd) -> int:
     if hwnd:
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     return pid.value
+
+
+def window_class(hwnd) -> str:
+    buf = ctypes.create_unicode_buffer(256)
+    if hwnd:
+        user32.GetClassNameW(hwnd, buf, 256)
+    return buf.value
+
+
+def window_rect(hwnd) -> tuple[int, int, int, int] | None:
+    """(left, top, right, bottom) in physical pixels."""
+    r = wintypes.RECT()
+    if not hwnd or not user32.GetWindowRect(hwnd, ctypes.byref(r)):
+        return None
+    return (r.left, r.top, r.right, r.bottom)
+
+
+# UIA control types a person clicks on as a whole: Button, CheckBox, ComboBox,
+# Edit, Hyperlink, ListItem, MenuItem, RadioButton, TabItem, TreeItem,
+# DataItem, SplitButton.
+CLICKABLE_TYPES = {50000, 50002, 50003, 50004, 50005, 50007, 50011, 50013,
+                   50019, 50024, 50029, 50031}
+
+
+def clickable_ancestor(chain: list[dict]) -> dict:
+    """From the hit element up to the window: the first a person would call
+    the thing they clicked (so the text inside a button gives the button)."""
+    return next((e for e in chain if e["type"] in CLICKABLE_TYPES or e["aid"]),
+                chain[0])
 
 
 def window_center(hwnd) -> tuple[int, int] | None:
@@ -471,6 +514,26 @@ class _UIA:
         except Exception:
             return ("", 0)
 
+    def target_at(self, x: int, y: int) -> dict:
+        """{"name", "type", "aid"} of the clickable element under the point,
+        walking up from the hit element to (not including) the window."""
+        try:
+            el = self._uia.ElementFromPoint(wintypes.POINT(x, y))
+            walker = self._uia.ControlViewWalker
+            root = self._uia.GetRootElement()
+            chain = []
+            while el and len(chain) < 12:
+                parent = walker.GetParentElement(el)
+                if not parent or self._uia.CompareElements(parent, root):
+                    break  # el is the top-level window itself
+                chain.append({"name": el.CurrentName or "",
+                              "type": el.CurrentControlType,
+                              "aid": el.CurrentAutomationId or ""})
+                el = parent
+            return clickable_ancestor(chain) if chain else {}
+        except Exception:
+            return {}
+
     # only these control types contribute a "ในช่อง ..." label; others (e.g.
     # a top-level window) would otherwise dump the window title into the step.
     _EDITABLE = {50003, 50004, 50030}  # ComboBox, Edit, Document
@@ -501,6 +564,8 @@ class Recorder:
         self.hooks_ok = False
         self.hook_error = 0
         self._on_hotkey = on_hotkey  # callback(name): "toggle" | "pause"
+        self.on_guide_click = None  # Guide Me: callback(button, x, y) while not recording
+        self.on_guide_key = None    # Guide Me: callback(key item) while not recording
 
         self._lock = threading.Lock()
         self._hooks_ready = threading.Event()
@@ -692,25 +757,35 @@ class Recorder:
                 threading.Thread(target=self._on_hotkey, args=(name,),
                                  daemon=True).start()
             return
-        if not self.recording or self.paused or vk in _MOD_VKS:
+        if vk in _MOD_VKS:
             return
-        fg = user32.GetForegroundWindow()
-        if is_own_window(fg) or not self.window_on_selected(fg):
-            return
+        if self.recording:
+            if self.paused:
+                return
+            fg = user32.GetForegroundWindow()
+            if is_own_window(fg) or not self.window_on_selected(fg):
+                return
+            send = self._queue.put
+        else:  # Guide Me watches typing outside StepCap; the callback only queues
+            send = self.on_guide_key
+            if send is None or is_own_window(user32.GetForegroundWindow()):
+                return
+        item = self._key_item(vk, scan)
+        if item:
+            send(item)
 
+    def _key_item(self, vk: int, scan: int) -> tuple | None:
+        """("shortcut", mods, key) | ("key", None, special) | ("key", char, None)"""
         mods = self._held_mods()
         special = VK_SPECIAL.get(vk)
         if ("Ctrl" in mods) or ("Alt" in mods) or ("Win" in mods):
             keyname = special or (chr(vk) if 0x30 <= vk <= 0x5A else f"VK{vk}")
             use_mods = [m for m in mods if m != "Shift"] or mods
-            self._queue.put(("shortcut", use_mods, keyname))
-            return
+            return ("shortcut", use_mods, keyname)
         if special:
-            self._queue.put(("key", None, special))
-            return
+            return ("key", None, special)
         char = self._translate(vk, scan)
-        if char:
-            self._queue.put(("key", char, None))
+        return ("key", char, None) if char else None
 
     def _translate(self, vk: int, scan: int) -> str | None:
         tid = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(),
@@ -725,11 +800,25 @@ class Recorder:
 
     # -- mouse hook ----------------------------------------------------------
     def _ms_cb(self, nCode, wParam, lParam):
-        if nCode == 0 and self.recording and not self.paused:
+        if nCode == 0 and (self.on_guide_click or self.recording and not self.paused):
             ms = ctypes.cast(lParam,
                              ctypes.POINTER(MSLLHOOKSTRUCT)).contents
-            self._handle_mouse(wParam, ms.pt.x, ms.pt.y)
+            if self.recording:
+                if not self.paused:
+                    self._handle_mouse(wParam, ms.pt.x, ms.pt.y)
+            else:
+                self._guide_hook(wParam, ms.pt.x, ms.pt.y)
         return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+    def _guide_hook(self, wParam, x, y):
+        """Guide Me watches presses outside StepCap; the callback only queues."""
+        cb = self.on_guide_click
+        if cb is None or self.recording or wParam not in (WM_LBUTTONDOWN, WM_RBUTTONDOWN):
+            return
+        if is_own_window(user32.GetAncestor(
+                user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT)):
+            return
+        cb("right" if wParam == WM_RBUTTONDOWN else "left", x, y)
 
     def _in_selected(self, x: int, y: int) -> bool:
         m = self.monitors[self.selected]
@@ -790,9 +879,11 @@ class Recorder:
             _, x, y, hwnd = item
             name, ct = uia.at_point(x, y) if uia else ("", 0)
             title, app, exe = window_info(hwnd)
+            el = uia.target_at(x, y) if uia else {}
             if self._pending:
                 _discard(self._pending[6])
-            self._pending = (x, y, name, ct, title, app, self._grab(), exe)
+            self._pending = (x, y, name, ct, title, app, self._grab(), exe,
+                             el, window_rect(hwnd), window_class(hwnd))
         elif kind == "commit":
             _, button, is_drag, t = item
             pend, self._pending = self._pending, None
@@ -816,7 +907,7 @@ class Recorder:
         return str(path)
 
     def _commit_click(self, button, pend, t: float):
-        x, y, name, ct, title, app, img, exe = pend
+        x, y, name, ct, title, app, img, exe, el, wr, cls = pend
         m = self.monitors[self.selected]
         marker = {"x": x - m["left"], "y": y - m["top"],
                   "color": "#FB923C", "size": 44}
@@ -836,9 +927,16 @@ class Recorder:
                 _discard(img)
                 return
 
+        target = None
+        if exe and wr:  # where Guide Me looks for it later; the exe's name only, never its path
+            target = {"exe": Path(exe).name, "window": title, "cls": cls,
+                      "dx": x - wr[0], "dy": y - wr[1],
+                      "name": el.get("name", ""), "type": el.get("type", 0)}
+            if el.get("aid"):
+                target["aid"] = el["aid"]
         step = self._builder.add_click(button, name, ct,
                                        app_label, image=img, marker=marker,
-                                       exe=exe)
+                                       exe=exe, target=target)
         self._last_click = step
         self._last_click_t = t
 

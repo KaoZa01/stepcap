@@ -95,11 +95,11 @@ def raw(path, token=True):
         return e.code, ""
 
 
-def find_win(pid):
+def find_win(pid, title="StepCap"):
     found = []
 
     def _cb(hwnd, _):
-        if R.window_pid(hwnd) == pid and R.window_title(hwnd) == "StepCap":
+        if R.window_pid(hwnd) == pid and R.window_title(hwnd) == title:
             found.append(hwnd)
             return False
         return True
@@ -523,7 +523,52 @@ def test_lang_route():
     assert '<html lang="th">' in raw("/")[1]
 
 
-TESTS = [test_old_guide_untouched, test_window_is_ours,
+def work_area():
+    r = wintypes.RECT()
+    U.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)  # SPI_GETWORKAREA
+    return (r.left, r.top, r.right, r.bottom)
+
+
+def test_guideme_routes():
+    assert get("/api/guideme") == {"active": False}
+    assert post("/api/guideme/start?gid=nope") == 404
+    assert raw("/api/guideme", token=False)[0] == 403
+
+
+def test_guideme_panel_floats_right():
+    # on the primary monitor (the old guide has no target), at the right edge of
+    # its work area; the work area itself never changes (desktop icons stay put)
+    import guideme
+    R.set_dpi_aware()
+    before = work_area()
+    pw = guideme.panel_width(guideme.monitor_dpi((before[0], before[1])))  # 400 at 100%, wider when scaled
+    assert post(f"/api/guideme/start?gid={OLD_ID}") == {}
+    h = None
+    try:
+        h = wait(lambda: find_win(CTX["pid"], "StepCap Guide Me"), 15)
+        assert h, "panel window never appeared"
+        r = wait(lambda: (w := R.window_rect(h)) and w[2] - w[0] == pw and w, 10)
+        assert r == (before[2] - pw, before[1], before[2], before[3]), (r, before, pw)
+        assert work_area() == before
+        assert affinity(h) == 0x11
+        assert post(f"/api/guideme/start?gid={OLD_ID}") == 409   # one at a time
+        post("/api/start")                                        # recording stays off
+        assert get("/api/status")["recording"] is False
+        s = get("/api/guideme")
+        assert s["active"] and s["gid"] == OLD_ID and s["index"] == 0
+        post("/api/guideme/go", {"step": "next"})
+        assert wait(lambda: get("/api/guideme")["index"] == 1, 5)
+        post("/api/guideme/go", {"to": 0})
+        assert wait(lambda: get("/api/guideme")["index"] == 0, 5)
+    finally:
+        post("/api/guideme/stop")
+    assert wait(lambda: not U.IsWindow(h), 5)
+    assert work_area() == before
+    assert get("/api/guideme") == {"active": False}
+
+
+TESTS = [test_guideme_routes, test_guideme_panel_floats_right,
+         test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
          test_library_routes, test_sample_route_and_settings, test_redact_settings_route, test_redact_route, test_lang_route, test_english_server_messages, test_running_mutex,
          test_ui_served, test_export_save_as,

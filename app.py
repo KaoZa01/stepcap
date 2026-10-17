@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import webview
 
 import exporters
+import guideme
 import i18n
 from i18n import tr
 import library
@@ -187,6 +188,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(library.list_trash(STORAGE))
         if p == "/api/status":
             return self._json(rec_status())
+        if p == "/api/guideme":
+            place_guide_panel()  # no-op once placed
+            g = GUIDE
+            return self._json({"active": True, "gid": g["gid"], **g["runner"].state()}
+                              if g else {"active": False})
         if p == "/api/settings":
             return self._json({**library.load_settings(STORAGE),
                                "storage": str(STORAGE),
@@ -238,6 +244,23 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/stop":
             guide = stop_rec_ui()
             return self._json({"guide": guide["id"] if guide else None})
+        if p == "/api/guideme/start":
+            r = start_guide_ui(qs.get("gid", [""])[0])
+            return self._json({}) if r == 200 else self._send(r, "guide me", "text/plain")
+        if p == "/api/guideme/stop":
+            stop_guide_ui()
+            return self._json({})
+        if p == "/api/guideme/go":
+            data, g = _obj(body), GUIDE
+            if g is None:
+                return self._send(409, "not guiding", "text/plain")
+            if data and isinstance(data.get("to"), int):
+                g["runner"].go(data["to"])
+            elif data and data.get("step") in ("next", "back"):
+                getattr(g["runner"], data["step"])()
+            else:
+                return self._send(400, "bad step", "text/plain")
+            return self._json({})
         if p in ("/api/monitor", "/api/flash"):
             try:
                 i = int(qs.get("i", [""])[0])
@@ -389,6 +412,8 @@ LAST_GUIDE = None      # id of that guide; open pages navigate to it
 REDACT_LOCK = threading.Lock()
 REDACT_BUSY: dict[str, list[int]] = {}  # gid -> [done, total]
 REDACT_NOTES: dict[str, str] = {}       # gid -> what its page says next time it opens
+GUIDE = None          # Guide Me: {"gid","runner","win","hwnd"} while the panel is open
+GUIDE_LOCK = threading.Lock()
 _HWND = None
 _MUTEX = None
 _RUNNING = None
@@ -416,7 +441,92 @@ def show_main():
         user32.SetForegroundWindow(h)
 
 
+def start_guide_ui(gid: str) -> int:
+    """Open the Guide Me panel on a guide: 200, 404 (no such guide) or 409
+    (recording, or already guiding)."""
+    global GUIDE
+    g = library.read_guide(STORAGE / gid) if library.safe_id(gid) else None
+    if g is None:
+        return 404
+    with GUIDE_LOCK:
+        if GUIDE is not None or REC.recording:
+            return 409
+        mons = REC.monitors
+        sel = mons[REC.selected]
+        # the panel goes on the monitor of the first target's window, else the primary
+        t = next((s["target"] for s in g["steps"] if s.get("target")), None)
+        w = t and guideme.pick_window(guideme.top_windows(), t["exe"], t.get("window", ""),
+                                      t.get("cls", ""))
+        mon = guideme.monitor_of(mons, ((w["rect"][0] + w["rect"][2]) // 2,
+                                        (w["rect"][1] + w["rect"][3]) // 2)
+                                 if w else (-10**9, -10**9))
+        def on_target(res):  # every tick: the outline, and the panel off the target
+            OV.highlight(res)
+            place_guide_panel(res)
+
+        runner = guideme.Runner(g["steps"], (sel["left"], sel["top"]), on_target)
+        win = webview.create_window(
+            guideme.PANEL_TITLE, f"http://127.0.0.1:{PORT}/?t={TOKEN}&guideme={gid}",
+            width=guideme.PANEL_W, height=800, frameless=True, on_top=True,
+            background_color="#FFFFFF", focus=False)
+        GUIDE = {"gid": gid, "runner": runner, "win": win, "hwnd": None,
+                 "work": mon["work"], "side": "right",
+                 "width": guideme.panel_width(guideme.monitor_dpi((mon["left"], mon["top"])))}
+        REC.on_guide_click, REC.on_guide_key = runner.click, runner.key
+
+    # shown may fire before this handler is attached (create_window returns
+    # after Show()), so the panel's first status poll places it too
+    win.events.shown += place_guide_panel
+    if win.events.shown.is_set():
+        place_guide_panel()
+    win.events.closed += stop_guide_ui
+    h = main_hwnd()
+    if h and user32.IsWindowVisible(h):
+        user32.ShowWindowAsync(h, recorder.SW_MINIMIZE)
+    return 200
+
+
+def place_guide_panel(res: dict | None = None):
+    """First call once the panel exists: hide it from screenshots and put it
+    at the right edge of the work area. With a target (each tick): switch
+    sides when the panel would cover it."""
+    with GUIDE_LOCK:
+        g = GUIDE
+        if g is None:
+            return
+        if not g["hwnd"]:
+            h = recorder.find_main_window(guideme.PANEL_TITLE)
+            if not h:
+                return
+            g["hwnd"] = h
+            recorder.set_capture_excluded(h, True)
+            guideme.place(h, guideme.panel_rect(g["work"], g["width"], g["side"]))
+        side = guideme.panel_side(g["work"], g["width"], (res or {}).get("rect"), g["side"])
+        if side != g["side"]:
+            g["side"] = side
+            guideme.place(g["hwnd"], guideme.panel_rect(g["work"], g["width"], side))
+
+
+def stop_guide_ui():
+    """Close Guide Me: highlight, hook, panel. Safe to call twice."""
+    global GUIDE
+    with GUIDE_LOCK:
+        g, GUIDE = GUIDE, None
+    if g is None:
+        return
+    REC.on_guide_click = REC.on_guide_key = None
+    g["runner"].stop()
+    OV.highlight(None)
+    try:
+        g["win"].destroy()
+    except Exception:
+        pass  # already closed by the person
+    show_main()
+
+
 def start_rec_ui():
+    if GUIDE is not None:  # Guide Me is on screen; recording waits
+        return
     if not REC.start_recording():
         return
     OV.toast(REC.monitor_rect(), tr("เริ่มบันทึกแล้ว"))
@@ -542,6 +652,7 @@ def flash_ui(i: int):
 def quit_app():
     global QUITTING
     QUITTING = True
+    stop_guide_ui()
     if REC.recording:
         REC.stop_recording()  # saves the guide
     OV.hide_panel()

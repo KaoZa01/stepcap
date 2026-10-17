@@ -1048,7 +1048,41 @@ def test_tour_esc_only_closes_tour():
     js("closePopMenu();")
 
 
-TESTS = [test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
+def test_guideme_panel():
+    n = len(json.loads((CTX["storage"] / "noise" / "guide.json").read_text(encoding="utf-8"))["steps"])
+    page("guideme=noise", width=360)
+    got = js(_until("document.querySelector('.gm-card.on canvas')")
+             + "const c = document.querySelectorAll('.gm-card');"
+             "return {cards: c.length, first: c[0].classList.contains('on'),"
+             " next: !!document.getElementById('gm-next'), back: !!document.getElementById('gm-back'),"
+             " close: !!document.getElementById('gm-close'),"
+             " wide: document.documentElement.scrollWidth > innerWidth};")
+    assert got == {"cards": n, "first": True, "next": True, "back": True, "close": True,
+                   "wide": False}, got
+
+
+def test_guideme_zoom_button():
+    # the picture can zoom to the area round the click and back
+    page("guideme=noise", width=400)
+    got = js(_until("document.querySelector('.gm-card.on canvas')?.width > 1")
+             + "const w0 = document.querySelector('.gm-img').width;"
+             "const z = document.getElementById('gm-zoom'); z.click();"
+             "await new Promise(r => setTimeout(r, 300));"
+             "const w1 = document.querySelector('.gm-img').width, p1 = z.getAttribute('aria-pressed');"
+             "document.getElementById('gm-zoom').click(); await new Promise(r => setTimeout(r, 300));"
+             "return {w0, w1, p1, w2: document.querySelector('.gm-img').width,"
+             " p2: document.getElementById('gm-zoom').getAttribute('aria-pressed')};")
+    assert got["w1"] < got["w0"] and got["p1"] == "true", got   # a third of the picture, drawn 1:1
+    assert got["w2"] == got["w0"] and got["p2"] == "false", got
+
+
+def test_viewer_has_guideme_button():
+    page("guide=noise")
+    assert js(_until("document.getElementById('guideme')")
+              + "return !!document.getElementById('guideme');")
+
+
+TESTS = [test_guideme_panel, test_guideme_zoom_button, test_viewer_has_guideme_button, test_bake_hides_pixels, test_export_contains_no_original, test_print_html_uses_img,
          test_render_sections, test_failed_labels_in_document_order,
          test_create_page_failure_reported,
          test_export_images_no_original, test_export_images_skip_broken,

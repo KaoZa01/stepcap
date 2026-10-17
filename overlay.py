@@ -78,6 +78,11 @@ class Overlay:
     def hide_panel(self):
         self._q.put(self._hide_panel)
 
+    def highlight(self, res: dict | None):
+        """Guide Me's outline on the target: a box on a found element, a circle
+        where it should be; None (or nothing to show) hides it."""
+        self._q.put(lambda: self._highlight(res))
+
     # tk-thread implementations -------------------------------------------
     def _flash(self, rect, color):
         l, t, r, b = rect
@@ -132,6 +137,46 @@ class Overlay:
             self._root.after(40, fade)
 
         self._root.after(900, fade)  # hold ~0.9s, then fade out
+
+    _HL_PAD, _HL_W = 4, 3  # outline sits 4px outside the element, 3px thick
+
+    def _highlight(self, res):
+        win = getattr(self, "_hl", None)
+        key = (res or {}).get("rect") and (res["shape"], res["rect"])
+        if not key or res.get("state") not in ("element", "approx"):
+            if win is not None:
+                win.withdraw()
+            self._hl_key = None
+            return
+        if key == getattr(self, "_hl_key", None):
+            return  # unchanged: no redraw, no flicker
+        self._hl_key = key
+        if win is None:
+            win = self._hl = tk.Toplevel(self._root)
+            win.overrideredirect(True)
+            win.attributes("-topmost", True)
+            win.configure(bg=_KEY)
+            win.attributes("-transparentcolor", _KEY)
+            self._hl_cv = tk.Canvas(win, bg=_KEY, highlightthickness=0)
+            self._hl_cv.pack(fill="both", expand=True)
+            self.capture_excluded = _style(win, clickthrough=True)
+        p = self._HL_PAD + self._HL_W
+        l, t, r, b = res["rect"]
+        w, h = r - l + 2 * p, b - t + 2 * p
+        win.geometry(f"{w}x{h}+{l - p}+{t - p}")
+        cv, s = self._hl_cv, self._HL_W
+        cv.delete("all")
+        o = (s / 2 + 1, s / 2 + 1, w - s / 2 - 1, h - s / 2 - 1)
+        if res["shape"] == "circle":
+            cv.create_oval(*o, outline="#fb923c", width=s)
+        else:  # rounded rect: a smoothed polygon with doubled corner points
+            x0, y0, x1, y1 = o
+            k = 6
+            pts = [x0 + k, y0, x1 - k, y0, x1, y0, x1, y0 + k, x1, y1 - k, x1, y1,
+                   x1 - k, y1, x0 + k, y1, x0, y1, x0, y1 - k, x0, y0 + k, x0, y0]
+            cv.create_polygon(pts, smooth=True, outline="#fb923c", fill="", width=s)
+        win.deiconify()
+        win.attributes("-topmost", True)
 
     def _hide_panel(self):
         if self._panel is not None:

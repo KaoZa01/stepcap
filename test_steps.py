@@ -2,8 +2,92 @@
 import time
 
 import i18n
-from recorder import (StepBuilder, compose_click_text, control_noun, monitor_index,
-                      title_stamp)
+from recorder import (Recorder, StepBuilder, clickable_ancestor, compose_click_text,
+                      control_noun, monitor_index, title_stamp)
+
+
+def test_clickable_ancestor_walks_up():
+    chain = [{"name": "Save", "type": 50020, "aid": ""},      # Text inside
+             {"name": "Save", "type": 50000, "aid": ""},      # Button
+             {"name": "Toolbar", "type": 50021, "aid": "tb"}]
+    assert clickable_ancestor(chain)["type"] == 50000
+
+
+def test_clickable_ancestor_aid_counts():
+    chain = [{"name": "", "type": 50020, "aid": ""}, {"name": "x", "type": 50033, "aid": "pane1"}]
+    assert clickable_ancestor(chain)["aid"] == "pane1"
+
+
+def test_clickable_ancestor_falls_back_to_hit():
+    chain = [{"name": "a", "type": 50020, "aid": ""}, {"name": "b", "type": 50033, "aid": ""}]
+    assert clickable_ancestor(chain)["name"] == "a"
+
+
+def test_click_step_keeps_target():
+    b = StepBuilder()
+    t = {"exe": "notepad.exe", "window": "Untitled", "dx": 5, "dy": 6, "name": "Save", "type": 50000}
+    s = b.add_click("click", "Save", 50000, "notepad", target=t)
+    assert s["target"] == t
+    assert "target" not in StepBuilder().add_click("click", "x", 50000, "a")
+
+
+def test_steps_record_what_to_press():
+    # Guide Me moves on when the person types / presses what was recorded
+    b = StepBuilder()
+    for c in "hi":
+        b.add_key(c, None, "Name", False)
+    b.add_key(None, "Enter", "Name", False)
+    b.add_key(None, "Tab", "", False)          # Tab on its own
+    b.add_key(None, "ลูกศรขวา", "", False)     # i18n-ok: an arrow on its own
+    b.add_shortcut(["Ctrl"], "S")
+    for c in "pw":
+        b.add_key(c, None, "Password", True)
+    b.add_key(None, "Tab", "Password", True)
+    s = b.finish()
+    assert [x.get("expect") for x in s] == [
+        {"typed": "hi", "ending": "Enter"}, {"key": "Tab"}, {"key": "ลูกศรขวา"},  # i18n-ok
+        {"keys": "Ctrl + S"}, {"ending": "Tab"}]
+
+
+def test_masked_typing_keeps_no_typed_value():
+    b = StepBuilder(mask=lambda t: "•••" if "@" in t else t)
+    for c in "a@b.co":
+        b.add_key(c, None, "Email", False)
+    s = b.finish()[0]
+    assert "typed" not in s.get("expect", {}) and "a@b.co" not in str(s)
+
+
+def test_commit_click_records_window_class():
+    r = Recorder.__new__(Recorder)
+    r._builder = StepBuilder()
+    r.monitors = [{"left": 0, "top": 0}]
+    r.selected = 0
+    r._last_click = None
+    pend = (110, 220, "Save", 50000, "Docs", "explorer", None, r"C:\Windows\explorer.exe",
+            {"name": "Save", "type": 50000, "aid": ""}, (100, 200, 900, 800), "CabinetWClass")
+    r._commit_click("click", pend, 1.0)
+    t = r._builder.steps[0]["target"]
+    assert t == {"exe": "explorer.exe", "window": "Docs", "cls": "CabinetWClass", "dx": 10,
+                 "dy": 20, "name": "Save", "type": 50000}, t
+
+
+def test_write_guide_keeps_target_not_app():
+    import json, shutil, tempfile
+    from pathlib import Path
+    st = Path(tempfile.mkdtemp(prefix="stepcap-steps-"))
+    try:
+        r = Recorder.__new__(Recorder)
+        r.storage = st
+        b = StepBuilder()
+        b.add_click("click", "Save", 50000, "StepCap", exe=r"C:\Users\x\a.exe",
+                    target={"exe": "a.exe", "window": "W", "dx": 1, "dy": 2,
+                            "name": "Save", "type": 50000})
+        g = r._write_guide(b.finish())
+        s = json.loads((st / g["id"] / "guide.json").read_text(encoding="utf-8"))["steps"][0]
+        assert s["target"]["exe"] == "a.exe" and "\\" not in json.dumps(s["target"])
+        assert "app" not in s and "exe" not in s
+    finally:
+        shutil.rmtree(st, ignore_errors=True)
 
 
 def _typed(b):

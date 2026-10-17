@@ -168,11 +168,18 @@ function viewPage() {
       <button class="icon-btn" id="back" title="${tr("กลับหน้าแรก")}" aria-label="${tr("กลับหน้าแรก")}">${ICON.back}</button>
       <div class="gtitle">${esc(STATE.title)}</div>
       <button class="btn" id="edit">${ICON.edit} ${tr("แก้ไข")}</button>
+      ${STATE.steps.length ? `<button class="btn" id="guideme">${ICON.play} ${tr("พาทำ")}</button>` : ""}
       <button class="btn dark" id="exp">${ICON.export} ${tr("ส่งออก")}</button>
     </header><div class="gbody"><div id="rg"></div>
       ${STATE.steps.length ? "" : `<p class="muted">${tr("กด <b>แก้ไข</b> เพื่อเพิ่มภาพหรือหมายเหตุ หรือบันทึกใหม่จากหน้าแรก")}</p>`}</div>`;
   document.getElementById("back").onclick = () => nav({page: "home"});
   document.getElementById("edit").onclick = () => goGuide(GID, "edit");
+  const gm = document.getElementById("guideme");
+  if (gm) gm.onclick = async () => {
+    let r = null;
+    try { r = await post("/api/guideme/start?gid=" + encodeURIComponent(GID)); } catch { /* offline */ }
+    if (!r || !r.ok) toastErr(r && r.status === 409 ? tr("หยุดบันทึก หรือปิดพาทำที่เปิดอยู่ก่อน") : FAILED);
+  };
   document.getElementById("exp").onclick = e => { e.stopPropagation(); exportMenu(e.currentTarget, GID); };
   const g = {...STATE, steps: STATE.steps.map(s => s.image ? {...s, _src: imgUrl(GID, s.image)} : s)};
   renderGuide(g, document.getElementById("rg"));
