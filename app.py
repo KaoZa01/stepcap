@@ -472,7 +472,7 @@ def start_guide_ui(gid: str) -> int:
         GUIDE = {"gid": gid, "runner": runner, "win": win, "hwnd": None,
                  "work": mon["work"], "side": "right",
                  "width": guideme.panel_width(guideme.monitor_dpi((mon["left"], mon["top"])))}
-        REC.on_guide_click = runner.click
+        REC.on_guide_click, REC.on_guide_key = runner.click, runner.key
 
     # shown may fire before this handler is attached (create_window returns
     # after Show()), so the panel's first status poll places it too
@@ -514,7 +514,7 @@ def stop_guide_ui():
         g, GUIDE = GUIDE, None
     if g is None:
         return
-    REC.on_guide_click = None
+    REC.on_guide_click = REC.on_guide_key = None
     g["runner"].stop()
     OV.highlight(None)
     try:

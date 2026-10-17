@@ -84,12 +84,48 @@ def button_ok(kind: str, button: str) -> bool:
     return button == ("right" if kind == "rightclick" else "left")
 
 
+def key_event(item: tuple) -> tuple:
+    """The recorder's key item as ("char", c) | ("special", name) | ("shortcut", "Ctrl + S")."""
+    if item[0] == "shortcut":
+        return ("shortcut", " + ".join(item[1] + [item[2]]))
+    return ("special", item[2]) if item[2] else ("char", item[1])
+
+
+def keys_done(step: dict, events: list[tuple]) -> bool:
+    """Has what this typing / key / shortcut step asks for been pressed?
+    events: what was pressed since the step became current."""
+    kind = step.get("kind")
+    if kind not in ("type", "password", "shortcut") or not events:
+        return False
+    e, last = step.get("expect") or {}, events[-1]
+    if "keys" in e:
+        return last == ("shortcut", e["keys"])
+    if "key" in e:
+        return last == ("special", e["key"])
+    if kind == "shortcut":  # recorded before Guide Me: any combo
+        return last[0] == "shortcut"
+    typed = e.get("typed")
+    if not typed:  # a password, masked text, or recorded before Guide Me
+        return last in (("special", "Enter"), ("special", "Tab"))
+    buf: list[str] = []
+    for ev in events:
+        if ev[0] == "char":
+            buf.append(ev[1])
+        elif ev == ("special", "Backspace") and buf:
+            buf.pop()
+    if not "".join(buf).endswith(typed):
+        return False
+    end = e.get("ending")
+    return last == ("special", end) if end else last[0] == "char"
+
+
 class Session:
     """Which step is current. index == len(steps) means done."""
 
     def __init__(self, steps: list[dict]):
         self.steps = steps
         self.index = 0
+        self._keys: list[tuple] = []  # pressed since this step became current
 
     @property
     def done(self) -> bool:
@@ -97,6 +133,17 @@ class Session:
 
     def go(self, i: int):
         self.index = max(0, min(i, len(self.steps)))
+        self._keys = []
+
+    def on_key(self, ev: tuple) -> bool:
+        """A key press anywhere: moves on when the step's typing is complete."""
+        if self.done:
+            return False
+        self._keys.append(ev)
+        if not keys_done(self.steps[self.index], self._keys):
+            return False
+        self.next()
+        return True
 
     def next(self):
         self.go(self.index + 1)
@@ -301,6 +348,9 @@ class Runner:
     def click(self, button: str, x: int, y: int):
         self._q.put(("click", button, x, y))  # called from the mouse hook: never block
 
+    def key(self, item: tuple):
+        self._q.put(("key", item))  # called from the keyboard hook: never block
+
     def go(self, i: int):
         self._q.put(("go", i))
 
@@ -335,6 +385,8 @@ class Runner:
             s = self.session
             if item and item[0] == "click":
                 s.on_click(item[1], item[2], item[3], self._res)
+            elif item and item[0] == "key":
+                s.on_key(key_event(item[1]))
             elif item and item[0] == "go":
                 s.go(item[1])
             elif item and item[0] == "step":

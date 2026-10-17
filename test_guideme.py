@@ -183,6 +183,58 @@ def test_uia_finds_own_button():
     assert all(w["hwnd"] != hwnd for w in top_windows())  # own windows skipped by default
 
 
+def test_keys_done_rules():
+    from guideme import keys_done
+    t = {"kind": "type", "expect": {"typed": "hi"}}
+    assert not keys_done(t, [("char", "h")])
+    assert keys_done(t, [("char", "h"), ("char", "i")])
+    assert keys_done(t, [("char", "x"), ("special", "Backspace"), ("char", "h"), ("char", "i")])
+    te = {"kind": "type", "expect": {"typed": "hi", "ending": "Enter"}}
+    assert not keys_done(te, [("char", "h"), ("char", "i")])
+    assert keys_done(te, [("char", "h"), ("char", "i"), ("special", "Enter")])
+    assert not keys_done(te, [("char", "h"), ("special", "Enter")])
+    assert keys_done({"kind": "type", "expect": {"key": "Tab"}}, [("special", "Tab")])
+    assert keys_done({"kind": "shortcut", "expect": {"keys": "Ctrl + S"}}, [("shortcut", "Ctrl + S")])
+    assert not keys_done({"kind": "shortcut", "expect": {"keys": "Ctrl + S"}}, [("shortcut", "Ctrl + C")])
+    # masked text, passwords and guides recorded before: Enter or Tab
+    for s in ({"kind": "type"}, {"kind": "password", "expect": {"ending": "Tab"}}, {"kind": "type", "expect": {}}):
+        assert not keys_done(s, [("char", "a")]) and keys_done(s, [("char", "a"), ("special", "Enter")])
+    assert keys_done({"kind": "shortcut"}, [("shortcut", "Ctrl + V")])  # old shortcut step: any combo
+    assert not keys_done({"kind": "click"}, [("special", "Enter")])
+    assert not keys_done({"kind": "note"}, [("special", "Enter")])
+
+
+def test_key_event_from_hook_items():
+    from guideme import key_event
+    assert key_event(("key", "a", None)) == ("char", "a")
+    assert key_event(("key", None, "Enter")) == ("special", "Enter")
+    assert key_event(("shortcut", ["Ctrl"], "S")) == ("shortcut", "Ctrl + S")
+
+
+def test_session_moves_on_typing():
+    s = Session([{"kind": "type", "expect": {"typed": "ok"}}, {"kind": "click"}])
+    assert not s.on_key(("char", "o")) and s.index == 0
+    assert s.on_key(("char", "k")) and s.index == 1
+    s.back()  # keys typed for an earlier visit don't count again
+    assert not s.on_key(("char", "k")) and s.index == 0
+
+
+def test_hook_forwards_keys_while_guiding():
+    import recorder
+    r = recorder.Recorder.__new__(recorder.Recorder)
+    r.recording, r.paused, r._on_hotkey = False, False, None
+    r._kbstate = (recorder.ctypes.c_ubyte * 256)()
+    got = []
+    r.on_guide_key = got.append
+    r._handle_keydown(0x0D, 0x1C)          # Enter
+    r._kbstate[recorder.VK_CONTROL] = 0x80
+    r._handle_keydown(ord("S"), 0x1F)      # Ctrl+S
+    r._kbstate[recorder.VK_CONTROL] = 0
+    r.on_guide_key = None
+    r._handle_keydown(0x0D, 0x1C)          # not guiding: nothing
+    assert got == [("key", None, "Enter"), ("shortcut", ["Ctrl"], "S")], got
+
+
 def test_hook_forwards_clicks_not_on_own_windows():
     # the hook's decision only; no input is sent
     import tkinter as tk

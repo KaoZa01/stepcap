@@ -133,7 +133,15 @@ class _Typing:
 
     def finish(self) -> dict:
         kind = "password" if self.is_password else "type"
-        return {"id": _new_id(), "kind": kind, "text": self.text()}
+        # what Guide Me waits for: the typed text, unless it is a password or
+        # was masked (then Enter/Tab), and the key that ended it
+        expect = {}
+        typed = "".join(self.chars)
+        if typed and not self.is_password and self.mask(typed) == typed:
+            expect["typed"] = typed
+        if self.ending:
+            expect["ending"] = self.ending
+        return {"id": _new_id(), "kind": kind, "text": self.text(), "expect": expect}
 
 
 class StepBuilder:
@@ -183,7 +191,8 @@ class StepBuilder:
         if special in ("Enter", "Tab"):
             if self._typing is None:
                 self.steps.append(
-                    {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special))})
+                    {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special)),
+                     "expect": {"key": special}})
                 return
             self._typing.ending = special
             self._flush()
@@ -191,7 +200,8 @@ class StepBuilder:
         if special is not None:  # arrows / Delete / F-keys etc. pressed alone
             self._flush()
             self.steps.append(
-                {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special))})
+                {"id": _new_id(), "kind": "type", "text": tr("กด {k}", k=key_label(special)),
+                 "expect": {"key": special}})
             return
 
         # normal character
@@ -204,7 +214,8 @@ class StepBuilder:
         self._flush()
         combo = " + ".join(mods + [keyname])
         self.steps.append(
-            {"id": _new_id(), "kind": "shortcut", "text": tr("กด {k}", k=key_label(combo))})
+            {"id": _new_id(), "kind": "shortcut", "text": tr("กด {k}", k=key_label(combo)),
+             "expect": {"keys": combo}})
 
     def add_note(self, text: str):
         self._flush()
@@ -554,6 +565,7 @@ class Recorder:
         self.hook_error = 0
         self._on_hotkey = on_hotkey  # callback(name): "toggle" | "pause"
         self.on_guide_click = None  # Guide Me: callback(button, x, y) while not recording
+        self.on_guide_key = None    # Guide Me: callback(key item) while not recording
 
         self._lock = threading.Lock()
         self._hooks_ready = threading.Event()
@@ -745,25 +757,35 @@ class Recorder:
                 threading.Thread(target=self._on_hotkey, args=(name,),
                                  daemon=True).start()
             return
-        if not self.recording or self.paused or vk in _MOD_VKS:
+        if vk in _MOD_VKS:
             return
-        fg = user32.GetForegroundWindow()
-        if is_own_window(fg) or not self.window_on_selected(fg):
-            return
+        if self.recording:
+            if self.paused:
+                return
+            fg = user32.GetForegroundWindow()
+            if is_own_window(fg) or not self.window_on_selected(fg):
+                return
+            send = self._queue.put
+        else:  # Guide Me watches typing outside StepCap; the callback only queues
+            send = self.on_guide_key
+            if send is None or is_own_window(user32.GetForegroundWindow()):
+                return
+        item = self._key_item(vk, scan)
+        if item:
+            send(item)
 
+    def _key_item(self, vk: int, scan: int) -> tuple | None:
+        """("shortcut", mods, key) | ("key", None, special) | ("key", char, None)"""
         mods = self._held_mods()
         special = VK_SPECIAL.get(vk)
         if ("Ctrl" in mods) or ("Alt" in mods) or ("Win" in mods):
             keyname = special or (chr(vk) if 0x30 <= vk <= 0x5A else f"VK{vk}")
             use_mods = [m for m in mods if m != "Shift"] or mods
-            self._queue.put(("shortcut", use_mods, keyname))
-            return
+            return ("shortcut", use_mods, keyname)
         if special:
-            self._queue.put(("key", None, special))
-            return
+            return ("key", None, special)
         char = self._translate(vk, scan)
-        if char:
-            self._queue.put(("key", char, None))
+        return ("key", char, None) if char else None
 
     def _translate(self, vk: int, scan: int) -> str | None:
         tid = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(),
