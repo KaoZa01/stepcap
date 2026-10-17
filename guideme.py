@@ -174,6 +174,9 @@ def monitor_of(mons: list[dict], pt: tuple[int, int]) -> dict:
 _EXE: dict[tuple, str] = {}  # (hwnd, pid) -> exe name
 _dwm = ctypes.windll.dwmapi
 window_class = recorder.window_class
+recorder.user32.FindWindowExW.restype = wintypes.HWND
+recorder.user32.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND,
+                                          wintypes.LPCWSTR, wintypes.LPCWSTR]
 
 
 def _cloaked(h) -> bool:
@@ -202,8 +205,19 @@ def top_windows(skip_own: bool = True) -> list[dict]:
                              "title": recorder.window_title(h), "rect": r})
         return True
 
-    u.EnumWindows(recorder.WNDENUMPROC(_cb), 0)
+    for h in top_level_windows():
+        _cb(h, 0)
     return wins
+
+
+def top_level_windows() -> list:
+    """Every top-level window, top-most first. FindWindowEx, not EnumWindows:
+    EnumWindows leaves out the shell's own band (Start, Search), which guides
+    click often."""
+    out, h = [], None
+    while h := recorder.user32.FindWindowExW(None, h, None, None):
+        out.append(h)
+    return out
 
 
 class UIAFind:

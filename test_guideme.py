@@ -29,6 +29,15 @@ def test_taskbar_is_a_window_to_search():
                for w in top_windows())
 
 
+def test_start_menu_is_a_window_to_search():
+    # Start and Search live in a shell band EnumWindows leaves out; Start is
+    # cloaked while closed, so look at the list before that filter
+    import recorder
+    from guideme import top_level_windows
+    assert any(recorder.window_info(h)[1].lower() == "startmenuexperiencehost"
+               for h in top_level_windows())
+
+
 def test_panel_width_follows_scale():
     from guideme import panel_width
     assert panel_width(96) == 360 and panel_width(144) == 540 and panel_width(192) == 720
