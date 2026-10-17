@@ -117,52 +117,35 @@ def panel_width(dpi: int) -> int:
     return round(PANEL_W * dpi / 96)
 
 
-def panel_rect(mon: tuple, width: int = PANEL_W) -> tuple:
-    """The side panel's strip at the right edge of a monitor."""
-    return (mon[2] - width, mon[1], mon[2], mon[3])
+def panel_rect(work: tuple, width: int, side: str = "right") -> tuple:
+    """The side panel's strip at one edge of a monitor's work area."""
+    if side == "left":
+        return (work[0], work[1], work[0] + width, work[3])
+    return (work[2] - width, work[1], work[2], work[3])
+
+
+def panel_side(work: tuple, width: int, target: tuple | None, side: str) -> str:
+    """The panel floats over other windows (it reserves no space, so desktop
+    icons never move): it changes sides when it would cover the target."""
+    def covers(s):
+        p = panel_rect(work, width, s)
+        return target[0] < p[2] and p[0] < target[2] and target[1] < p[3] and p[1] < target[3]
+    other = "left" if side == "right" else "right"
+    return other if target and covers(side) and not covers(other) else side
 
 
 # -- Windows glue -------------------------------------------------------------
-class _APPBARDATA(ctypes.Structure):
-    _fields_ = [("cbSize", wintypes.DWORD), ("hWnd", wintypes.HWND),
-                ("uCallbackMessage", wintypes.UINT), ("uEdge", wintypes.UINT),
-                ("rc", wintypes.RECT), ("lParam", wintypes.LPARAM)]
-
-
-_shell32 = ctypes.windll.shell32
-_shell32.SHAppBarMessage.argtypes = [wintypes.DWORD, ctypes.POINTER(_APPBARDATA)]
-_shell32.SHAppBarMessage.restype = ctypes.c_size_t
 recorder.user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
                                          ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                          wintypes.UINT]
-_ABM_NEW, _ABM_REMOVE, _ABM_QUERYPOS, _ABM_SETPOS, _ABE_RIGHT = 0, 1, 2, 3, 2
 
 
-def _abd(hwnd) -> _APPBARDATA:
-    d = _APPBARDATA()
-    d.cbSize = ctypes.sizeof(_APPBARDATA)
-    d.hWnd = hwnd
-    d.uEdge = _ABE_RIGHT
-    d.uCallbackMessage = 0x0400 + 0x47  # WM_USER+n; the panel ignores it
-    return d
-
-
-def dock_right(hwnd, mon: tuple, width: int = PANEL_W) -> tuple | None:
-    """Reserve a strip at the monitor's right edge (as the taskbar does), so
-    maximised windows shrink beside it, and move the window into it."""
-    if not hwnd:
-        return None
-    d = _abd(hwnd)
-    _shell32.SHAppBarMessage(_ABM_NEW, ctypes.byref(d))
-    d.rc.left, d.rc.top, d.rc.right, d.rc.bottom = panel_rect(mon, width)
-    _shell32.SHAppBarMessage(_ABM_QUERYPOS, ctypes.byref(d))  # may move it off a taskbar
-    d.rc.left = d.rc.right - width
-    _shell32.SHAppBarMessage(_ABM_SETPOS, ctypes.byref(d))
-    r = (d.rc.left, d.rc.top, d.rc.right, d.rc.bottom)
-    HWND_TOPMOST, SWP_NOACTIVATE = -1, 0x10
-    recorder.user32.SetWindowPos(hwnd, HWND_TOPMOST, r[0], r[1], r[2] - r[0],
-                                 r[3] - r[1], SWP_NOACTIVATE)
-    return r
+def place(hwnd, r: tuple):
+    """Topmost at r, without taking focus or waiting on the panel's thread."""
+    HWND_TOPMOST, SWP_NOACTIVATE, SWP_ASYNCWINDOWPOS = -1, 0x10, 0x4000
+    if hwnd:
+        recorder.user32.SetWindowPos(hwnd, HWND_TOPMOST, r[0], r[1], r[2] - r[0],
+                                     r[3] - r[1], SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS)
 
 
 def monitor_dpi(pt: tuple[int, int]) -> int:
@@ -179,11 +162,6 @@ def monitor_dpi(pt: tuple[int, int]) -> int:
     except Exception:
         pass
     return 96
-
-
-def undock(hwnd):
-    if hwnd:
-        _shell32.SHAppBarMessage(_ABM_REMOVE, ctypes.byref(_abd(hwnd)))
 
 
 def monitor_of(mons: list[dict], pt: tuple[int, int]) -> dict:

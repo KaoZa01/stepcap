@@ -207,8 +207,20 @@ def test_overlay_highlight_box_and_hide():
 
 def test_panel_rect():
     from guideme import panel_rect
-    assert panel_rect((0, 0, 1920, 1080)) == (1560, 0, 1920, 1080)
-    assert panel_rect((-1280, 0, 0, 1024)) == (-360, 0, 0, 1024)
+    assert panel_rect((0, 0, 1920, 1040), 360) == (1560, 0, 1920, 1040)
+    assert panel_rect((-1280, 0, 0, 984), 360) == (-360, 0, 0, 984)
+    assert panel_rect((0, 0, 1920, 1040), 540, "left") == (0, 0, 540, 1040)
+
+
+def test_panel_moves_off_the_target():
+    from guideme import panel_side
+    work = (0, 0, 1920, 1040)
+    assert panel_side(work, 360, (1800, 10, 1900, 40), "right") == "left"   # target under the panel
+    assert panel_side(work, 360, (500, 10, 600, 40), "left") == "left"      # off both: stay put
+    assert panel_side(work, 360, (500, 10, 600, 40), "right") == "right"
+    assert panel_side(work, 360, (20, 10, 90, 40), "left") == "right"       # under it on the left
+    assert panel_side(work, 360, (0, 0, 1920, 1040), "right") == "right"    # under both: stay put
+    assert panel_side(work, 360, None, "left") == "left"
 
 
 if __name__ == "__main__":

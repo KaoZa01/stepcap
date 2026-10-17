@@ -189,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/status":
             return self._json(rec_status())
         if p == "/api/guideme":
-            dock_guide_panel()  # no-op once docked
+            place_guide_panel()  # no-op once placed
             g = GUIDE
             return self._json({"active": True, "gid": g["gid"], **g["runner"].state()}
                               if g else {"active": False})
@@ -460,20 +460,25 @@ def start_guide_ui(gid: str) -> int:
         mon = guideme.monitor_of(mons, ((w["rect"][0] + w["rect"][2]) // 2,
                                         (w["rect"][1] + w["rect"][3]) // 2)
                                  if w else (-10**9, -10**9))
-        runner = guideme.Runner(g["steps"], (sel["left"], sel["top"]), OV.highlight)
+        def on_target(res):  # every tick: the outline, and the panel off the target
+            OV.highlight(res)
+            place_guide_panel(res)
+
+        runner = guideme.Runner(g["steps"], (sel["left"], sel["top"]), on_target)
         win = webview.create_window(
             guideme.PANEL_TITLE, f"http://127.0.0.1:{PORT}/?t={TOKEN}&guideme={gid}",
             width=guideme.PANEL_W, height=800, frameless=True, on_top=True,
             background_color="#FFFFFF", focus=False)
         GUIDE = {"gid": gid, "runner": runner, "win": win, "hwnd": None,
-                 "mon": (mon["left"], mon["top"], mon["right"], mon["bottom"])}
+                 "work": mon["work"], "side": "right",
+                 "width": guideme.panel_width(guideme.monitor_dpi((mon["left"], mon["top"])))}
         REC.on_guide_click = runner.click
 
     # shown may fire before this handler is attached (create_window returns
-    # after Show()), so the panel's first status poll docks it too
-    win.events.shown += dock_guide_panel
+    # after Show()), so the panel's first status poll places it too
+    win.events.shown += place_guide_panel
     if win.events.shown.is_set():
-        dock_guide_panel()
+        place_guide_panel()
     win.events.closed += stop_guide_ui
     h = main_hwnd()
     if h and user32.IsWindowVisible(h):
@@ -481,24 +486,29 @@ def start_guide_ui(gid: str) -> int:
     return 200
 
 
-def dock_guide_panel():
-    """Hide the panel from screenshots and dock it at the monitor's right
-    edge, once. Under the lock, so a stop can't undock before this docks."""
+def place_guide_panel(res: dict | None = None):
+    """First call once the panel exists: hide it from screenshots and put it
+    at the right edge of the work area. With a target (each tick): switch
+    sides when the panel would cover it."""
     with GUIDE_LOCK:
         g = GUIDE
-        if g is None or g["hwnd"]:
+        if g is None:
             return
-        h = recorder.find_main_window(guideme.PANEL_TITLE)
-        if not h:
-            return
-        g["hwnd"] = h
-        recorder.set_capture_excluded(h, True)
-        m = g["mon"]
-        guideme.dock_right(h, m, guideme.panel_width(guideme.monitor_dpi((m[0], m[1]))))
+        if not g["hwnd"]:
+            h = recorder.find_main_window(guideme.PANEL_TITLE)
+            if not h:
+                return
+            g["hwnd"] = h
+            recorder.set_capture_excluded(h, True)
+            guideme.place(h, guideme.panel_rect(g["work"], g["width"], g["side"]))
+        side = guideme.panel_side(g["work"], g["width"], (res or {}).get("rect"), g["side"])
+        if side != g["side"]:
+            g["side"] = side
+            guideme.place(g["hwnd"], guideme.panel_rect(g["work"], g["width"], side))
 
 
 def stop_guide_ui():
-    """Close Guide Me: highlight, hook, AppBar, panel. Safe to call twice."""
+    """Close Guide Me: highlight, hook, panel. Safe to call twice."""
     global GUIDE
     with GUIDE_LOCK:
         g, GUIDE = GUIDE, None
@@ -507,7 +517,6 @@ def stop_guide_ui():
     REC.on_guide_click = None
     g["runner"].stop()
     OV.highlight(None)
-    guideme.undock(g["hwnd"] or recorder.find_main_window(guideme.PANEL_TITLE))
     try:
         g["win"].destroy()
     except Exception:

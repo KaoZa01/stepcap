@@ -535,8 +535,9 @@ def test_guideme_routes():
     assert raw("/api/guideme", token=False)[0] == 403
 
 
-def test_guideme_docks_and_restores():
-    # an AppBar on the primary monitor (the old guide has no target), then gone
+def test_guideme_panel_floats_right():
+    # on the primary monitor (the old guide has no target), at the right edge of
+    # its work area; the work area itself never changes (desktop icons stay put)
     import guideme
     R.set_dpi_aware()
     before = work_area()
@@ -547,8 +548,8 @@ def test_guideme_docks_and_restores():
         h = wait(lambda: find_win(CTX["pid"], "StepCap Guide Me"), 15)
         assert h, "panel window never appeared"
         r = wait(lambda: (w := R.window_rect(h)) and w[2] - w[0] == pw and w, 10)
-        assert r and r[2] == before[2], (r, pw)
-        assert wait(lambda: work_area() == (before[0], before[1], before[2] - pw, before[3]), 5)
+        assert r == (before[2] - pw, before[1], before[2], before[3]), (r, before, pw)
+        assert work_area() == before
         assert affinity(h) == 0x11
         assert post(f"/api/guideme/start?gid={OLD_ID}") == 409   # one at a time
         post("/api/start")                                        # recording stays off
@@ -561,12 +562,12 @@ def test_guideme_docks_and_restores():
         assert wait(lambda: get("/api/guideme")["index"] == 0, 5)
     finally:
         post("/api/guideme/stop")
-    assert wait(lambda: work_area() == before, 5), "work area not given back"
     assert wait(lambda: not U.IsWindow(h), 5)
+    assert work_area() == before
     assert get("/api/guideme") == {"active": False}
 
 
-TESTS = [test_guideme_routes, test_guideme_docks_and_restores,
+TESTS = [test_guideme_routes, test_guideme_panel_floats_right,
          test_old_guide_untouched, test_window_is_ours,
          test_close_hides_while_recording, test_second_instance_shows_window,
          test_library_routes, test_sample_route_and_settings, test_redact_settings_route, test_redact_route, test_lang_route, test_english_server_messages, test_running_mutex,
