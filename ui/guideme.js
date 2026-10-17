@@ -3,7 +3,7 @@
 // finds the target on screen and moves on when it is clicked; this page only
 // shows where things are and sends back / next / jump / close.
 "use strict";
-const GM = {gid: null, g: null, key: "", idx: -1, imgs: {}};
+const GM = {gid: null, g: null, key: "", idx: -1, imgs: {}, zoom: false};
 
 async function guideMePage(gid) {
   GM.gid = gid;
@@ -30,6 +30,10 @@ async function guideMePage(gid) {
   document.getElementById("gm-next").onclick = () => go({step: "next"});
   document.getElementById("gm-list").onclick = e => {
     if (e.target.closest("#gm-finish")) return close();
+    if (e.target.closest("#gm-zoom, .gm-img")) {  // the choice stays for the next steps
+      GM.zoom = !GM.zoom;
+      return gmDraw();
+    }
     const card = e.target.closest(".gm-card[data-i]");
     if (card && !card.classList.contains("on")) go({to: +card.dataset.i});
   };
@@ -61,7 +65,8 @@ function gmRender(s) {
       const status = s.state === "approx" ? tr("ตำแหน่งโดยประมาณ")
         : s.state === "missing" ? tr("หาเป้าหมายไม่เจอ เปิด {app} ให้ตรงกับหน้านี้ก่อน", {app: s.app}) : "";
       body = (status ? `<p class="gm-status${s.state === "missing" ? " warn" : ""}">${esc(status)}</p>` : "")
-        + (st.image ? `<canvas class="gm-img"></canvas>` : "");
+        + (st.image ? `<div class="gm-pic"><canvas class="gm-img"></canvas>
+            <button type="button" class="icon-btn gm-zoom" id="gm-zoom"></button></div>` : "");
     }
     return `<li class="gm-card${on ? " on" : ""}" data-i="${i}"><div class="gm-head">
       <span class="gm-num">${num}</span><span class="gm-text">${esc(st.text || "")}</span></div>${body}</li>`;
@@ -74,11 +79,34 @@ function gmRender(s) {
   document.getElementById("gm-back").disabled = s.index === 0;
   document.getElementById("gm-next").disabled = s.done;
   const cur = list.querySelector(".gm-card.on");
-  const st = steps[s.index];
-  const cv = cur && cur.querySelector(".gm-img");
-  if (cv) gmImage(st.image).then(img => img && drawStepCanvas(cv, img, st, 640));
   if (cur && s.index !== GM.idx) cur.scrollIntoView({block: "nearest"});
   GM.idx = s.index;
+  gmDraw();
+}
+
+// The current step's picture: the whole of it, or zoomed to a third of it
+// round the click (layers, redactions included: drawStepCanvas does them).
+function gmDraw() {
+  const cv = document.querySelector(".gm-card.on .gm-img");
+  const btn = document.getElementById("gm-zoom");
+  if (!cv) return;
+  const label = GM.zoom ? tr("ดูทั้งภาพ") : tr("ซูมเข้าจุดที่ต้องคลิก");
+  Object.assign(btn, {title: label, innerHTML: GM.zoom ? ICON.zoomOut : ICON.zoomIn});
+  btn.setAttribute("aria-label", label);
+  btn.setAttribute("aria-pressed", String(GM.zoom));
+  const st = GM.g.steps[GM.idx];
+  gmImage(st.image).then(img => {
+    if (!img) return;
+    let view = st;
+    if (GM.zoom) {
+      const W = img.naturalWidth, H = img.naturalHeight, w = Math.round(W / 3), h = Math.round(H / 3);
+      const m = (st.markers || [])[0] || {x: W / 2, y: H / 2};
+      const x = Math.round(Math.min(Math.max(0, m.x - w / 2), W - w));
+      const y = Math.round(Math.min(Math.max(0, m.y - h / 2), H - h));
+      view = {...st, crop: {x, y, w, h}};
+    }
+    drawStepCanvas(cv, img, view, 800);
+  });
 }
 
 function gmImage(file) {

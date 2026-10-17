@@ -356,7 +356,10 @@
   .gm-card.on .gm-text{color:var(--ink);font-weight:600}
   .gm-status{margin:10px 0 0;font-size:13px;color:var(--muted)}
   .gm-status.warn{color:var(--danger-ink);background:var(--danger-bg);border-radius:8px;padding:8px 10px}
-  .gm-img{display:block;width:100%;height:auto;margin-top:10px;border:1px solid var(--line);border-radius:8px}
+  .gm-pic{position:relative;margin:10px -8px 0}
+  .gm-img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:8px;cursor:zoom-in}
+  .gm-zoom{position:absolute;top:6px;right:6px;background:#fff;border:1px solid var(--line-strong);box-shadow:0 1px 3px rgba(17,24,39,.15)}
+  .gm-pic:has(.gm-zoom[aria-pressed="true"]) .gm-img{cursor:zoom-out}
   .gm-done .btn{margin-top:12px}
   .gm-foot{display:flex;justify-content:space-between;gap:8px;padding:12px;background:#fff;border-top:1px solid var(--line);flex-wrap:wrap}
   .gm-empty{padding:16px}

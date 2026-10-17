@@ -40,7 +40,7 @@ def test_start_menu_is_a_window_to_search():
 
 def test_panel_width_follows_scale():
     from guideme import panel_width
-    assert panel_width(96) == 360 and panel_width(144) == 540 and panel_width(192) == 720
+    assert panel_width(96) == 400 and panel_width(144) == 600 and panel_width(192) == 800
     from guideme import monitor_dpi
     assert monitor_dpi((0, 0)) >= 96  # the primary monitor's real DPI
 

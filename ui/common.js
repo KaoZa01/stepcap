@@ -80,6 +80,8 @@ const ICON = {
   x: _svg('<path d="M18 6 6 18M6 6l12 12"/>'),
   fwd: _svg('<path d="m9 18 6-6-6-6"/>'),
   play: _svg('<path d="M7 4v16l13-8z"/>'),
+  zoomIn: _svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/>'),
+  zoomOut: _svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M8 11h6"/>'),
 };
 const LOGO = `<svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="#fb923c"/>` +
   `<circle cx="16" cy="16" r="7.5" fill="none" stroke="#fff" stroke-width="3.2"/></svg>`;

@@ -113,7 +113,7 @@ class Session:
         return True
 
 
-PANEL_W = 360
+PANEL_W = 400  # at 100% scale; wide enough for a readable step picture
 PANEL_TITLE = "StepCap Guide Me"  # also how the app finds the panel's window
 
 

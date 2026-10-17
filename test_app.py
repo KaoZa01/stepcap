@@ -541,7 +541,7 @@ def test_guideme_panel_floats_right():
     import guideme
     R.set_dpi_aware()
     before = work_area()
-    pw = guideme.panel_width(guideme.monitor_dpi((before[0], before[1])))  # 360 at 100%, wider when scaled
+    pw = guideme.panel_width(guideme.monitor_dpi((before[0], before[1])))  # 400 at 100%, wider when scaled
     assert post(f"/api/guideme/start?gid={OLD_ID}") == {}
     h = None
     try:
