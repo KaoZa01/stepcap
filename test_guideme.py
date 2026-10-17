@@ -86,6 +86,15 @@ def test_resolve_approx_when_element_missing():
     assert r["state"] == "approx" and r["shape"] == "circle" and r["rect"] == (118, 58, 162, 102)
 
 
+def test_resolve_approx_takes_the_button_at_that_spot():
+    # element not found by name, but the button under the recorded spot is
+    # known: outline (and hit-test) the whole button, not a marker-sized circle
+    r = resolve(STEP, lambda *a: W[0], lambda *a: [], (0, 0),
+                element_at=lambda pt, hwnd: (100, 60, 196, 144) if pt == (140, 80) and hwnd == 1 else None)
+    assert r["state"] == "approx" and r["shape"] == "box" and r["rect"] == (100, 60, 196, 144)
+    assert hit(r, 150, 135)  # the button's label, far from the recorded spot
+
+
 def test_resolve_missing_window():
     r = resolve(STEP, lambda *a: None, lambda *a: [], (0, 0))
     assert r["state"] == "missing" and r["app"] == "excel"
@@ -146,7 +155,12 @@ def test_uia_finds_own_button():
 
     def work():
         try:
-            out["rects"] = UIAFind().elements(hwnd, "", "Press me", 50000)
+            f = UIAFind()
+            out["rects"] = f.elements(hwnd, "", "Press me", 50000)
+            r = out["rects"][0]
+            c = ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2)
+            out["at"] = f.element_at(c, hwnd)
+            out["foreign"] = f.element_at(c, recorder.user32.GetShellWindow())
             out["wins"] = top_windows(skip_own=False)
         except Exception as e:
             out["err"] = e
@@ -159,6 +173,8 @@ def test_uia_finds_own_button():
     bx, by, bw, bh = b.winfo_rootx(), b.winfo_rooty(), b.winfo_width(), b.winfo_height()
     root.destroy()
     assert "err" not in out, out.get("err")
+    assert out["at"] == out["rects"][0], out  # the button under its own centre
+    assert out["foreign"] is None             # the point is ours, not that pid's
     assert len(out["rects"]) == 1
     l, t, r, btm = out["rects"][0]
     assert bx <= (l + r) / 2 <= bx + bw and by <= (t + btm) / 2 <= by + bh

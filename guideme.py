@@ -40,9 +40,11 @@ def _circle(cx: int, cy: int, size: int) -> tuple:
     return (cx - h, cy - h, cx + h, cy + h)
 
 
-def resolve(step: dict, find_window, find_elements, origin: tuple[int, int]) -> dict:
+def resolve(step: dict, find_window, find_elements, origin: tuple[int, int],
+            element_at=None) -> dict:
     """Where this step's target is on screen now.
-    state: element (box on the found element), approx (circle where it was),
+    state: element (box on the found element), approx (where it was: the
+    button now at that spot if element_at(pt, hwnd) knows one, else a circle),
     missing (its window isn't open), none (nothing to point at)."""
     res = {"state": "none", "shape": None, "rect": None, "app": ""}
     if step.get("kind") not in CLICKS:
@@ -62,6 +64,9 @@ def resolve(step: dict, find_window, find_elements, origin: tuple[int, int]) -> 
                               t.get("type", 0)), pt)
     if r:
         return {**res, "state": "element", "shape": "box", "rect": r}
+    r = element_at(pt, w["hwnd"]) if element_at else None
+    if r:  # the whole button counts, not just a marker-sized spot of it
+        return {**res, "state": "approx", "shape": "box", "rect": r}
     return {**res, "state": "approx", "shape": "circle", "rect": _circle(*pt, MARKER)}
 
 
@@ -242,6 +247,26 @@ class UIAFind:
             out.append((r.left, r.top, r.right, r.bottom))
         return out
 
+    def element_at(self, pt: tuple[int, int], hwnd) -> tuple | None:
+        """The rect of the clickable element (button, list item, ...) at pt,
+        if it belongs to hwnd's program; None otherwise."""
+        try:
+            el = self._u.ElementFromPoint(wintypes.POINT(*pt))
+            if not el or el.CurrentProcessId != recorder.window_pid(hwnd):
+                return None
+            walker = self._u.ControlViewWalker
+            for _ in range(8):
+                if not el:
+                    return None
+                if el.CurrentControlType in recorder.CLICKABLE_TYPES:
+                    r = el.CurrentBoundingRectangle
+                    return (r.left, r.top, r.right, r.bottom) if r.right > r.left \
+                        and r.bottom > r.top else None
+                el = walker.GetParentElement(el)
+        except Exception:
+            pass
+        return None
+
     def elements(self, hwnd, aid: str, name: str, ctype: int) -> list[tuple]:
         """Rects of the elements in that window matching aid, else name+type."""
         u = self._u
@@ -335,5 +360,6 @@ class Runner:
                 return pick_window(wins, exe, title, cls)
 
             find = uia.elements if uia else (lambda *a: [])
-            self._res = resolve(s.steps[s.index], find_window, find, self._origin)
+            self._res = resolve(s.steps[s.index], find_window, find, self._origin,
+                                uia.element_at if uia else None)
         self._highlight(self._res)
