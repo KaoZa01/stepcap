@@ -22,6 +22,13 @@ def test_pick_window_title_changed_uses_class():
     assert pick_window(wins, "explorer.exe", "Documents")["hwnd"] == 9  # old target: no class known
 
 
+def test_taskbar_is_a_window_to_search():
+    # guides often start on the taskbar (Start, a pinned app): it must be findable
+    from guideme import top_windows
+    assert any(w["cls"] == "Shell_TrayWnd" and w["exe"].lower() == "explorer.exe"
+               for w in top_windows())
+
+
 def test_panel_width_follows_scale():
     from guideme import panel_width
     assert panel_width(96) == 360 and panel_width(144) == 540 and panel_width(192) == 720

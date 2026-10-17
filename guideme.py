@@ -195,7 +195,6 @@ def monitor_of(mons: list[dict], pt: tuple[int, int]) -> dict:
 
 _EXE: dict[tuple, str] = {}  # (hwnd, pid) -> exe name
 _dwm = ctypes.windll.dwmapi
-recorder.user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 window_class = recorder.window_class
 
 
@@ -212,10 +211,10 @@ def top_windows(skip_own: bool = True) -> list[dict]:
 
     def _cb(h, _):
         if u.IsWindowVisible(h) and not u.IsIconic(h) and not _cloaked(h) \
-                and not u.GetWindowLongW(h, -20) & 0x80 \
                 and not (skip_own and recorder.window_pid(h) == me):
-            # (skipped: tool windows like the taskbar, and windows on other
-            # virtual desktops or suspended, which are "cloaked")
+            # (skipped: windows on other virtual desktops or suspended, which
+            # are "cloaked"; the taskbar stays: guides often click it, and the
+            # recorded window class keeps it from standing in for Explorer)
             r = recorder.window_rect(h)
             if r and r[2] > r[0] and r[3] > r[1]:
                 key = (h, recorder.window_pid(h))  # hwnds get reused
