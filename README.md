@@ -20,28 +20,79 @@
 ## ต้องมีอะไรบ้าง
 
 - Windows 11 (ทดสอบบน Windows 11) พร้อม Microsoft Edge WebView2 Runtime ซึ่ง Windows 11 มีให้อยู่แล้ว
-- Python 3.14
+- ถ้ารันจากซอร์ส ต้องมี Python 3.14 เพิ่ม
 
-## ติดตั้ง
+## วิธีติดตั้ง (Setup guide)
 
-**สำหรับผู้ใช้ทั่วไป:** ใช้ไฟล์ `StepCap-Setup-<version>.exe` ไฟล์เดียว ไม่ต้องลง Python และไม่ต้องใช้สิทธิ์ admin
-วิธีติดตั้ง และวิธีกดผ่านหน้าจอ "Windows protected your PC" อยู่ใน [docs/install-guide.md](docs/install-guide.md)
-(ข้อความสองภาษา คัดลอกไปส่งพร้อมไฟล์ได้เลย)
+### ผู้ใช้ทั่วไป: ใช้ไฟล์ติดตั้ง
 
-**สำหรับนักพัฒนา (รันจากซอร์ส):**
+ไม่ต้องลง Python และไม่ต้องใช้สิทธิ์ admin
+
+1. ดาวน์โหลดไฟล์ `StepCap-Setup-<version>.exe` จากหน้า [Releases](https://github.com/KaoZa01/stepcap/releases/latest)
+2. ดับเบิลคลิกไฟล์ที่ดาวน์โหลดมา
+3. ถ้าขึ้นหน้าจอสีน้ำเงิน "Windows protected your PC" ให้กด **More info** แล้วกด **Run anyway**
+   (ขึ้นเพราะไฟล์ยังไม่ได้เซ็นใบรับรองจาก Microsoft ไม่ใช่ไวรัส)
+4. เลือกภาษา **ไทย** หรือ **English** แล้วกด **ตกลง** StepCap จะใช้ภาษานี้ตอนเปิดครั้งแรก
+5. กด **ถัดไป** เลือกว่าจะให้มีไอคอนบนเดสก์ท็อปหรือไม่ แล้วกด **ติดตั้ง**
+   - ถ้า StepCap เปิดค้างอยู่ ตัวติดตั้งจะขอให้ปิดก่อน
+   - ถ้าเครื่องไม่มี WebView2 ตัวติดตั้งจะแจ้งให้ลงก่อน
+6. กด **เสร็จสิ้น** StepCap จะเปิดขึ้นมา ครั้งต่อไปเปิดได้จากเมนู Start หรือไอคอนบนเดสก์ท็อป
+
+โปรแกรมติดตั้งไว้ที่ `%LOCALAPPDATA%\Programs\StepCap` เฉพาะผู้ใช้คนนั้น
+ติดตั้งรุ่นใหม่ทับได้เลย ถ้าจะถอนการติดตั้งให้ไปที่ **Settings > Apps > StepCap > Uninstall** (คู่มือใน `Documents\StepCap` จะยังอยู่)
+
+ถ้าจะส่งไฟล์ติดตั้งให้เพื่อนร่วมงาน มีข้อความวิธีติดตั้งสองภาษาให้คัดลอกไปส่งพร้อมไฟล์ใน [docs/install-guide.md](docs/install-guide.md)
+
+### นักพัฒนา: รันจากซอร์ส
+
+เปิด PowerShell แล้วทำตามทีละขั้น
+
+**1. ลง Python 3.14 และ Git**
+
+```powershell
+winget install Python.Python.3.14
+winget install Git.Git
+```
+
+ลงเสร็จแล้วให้ปิดหน้าต่าง PowerShell แล้วเปิดใหม่ เพื่อให้เรียกคำสั่ง `python` และ `git` ได้ จากนั้นพิมพ์ `python --version` ต้องขึ้น `Python 3.14` (จะโหลดตัวติดตั้งจาก python.org แทนก็ได้ แต่ต้องติ๊ก "Add python.exe to PATH")
+
+<img src="docs/images/setup-1.svg" width="600" alt="PowerShell: winget ลง Python และ Git แล้ว python --version ขึ้น Python 3.14.0">
+
+**2. ดึงโค้ด**
 
 ```powershell
 git clone https://github.com/KaoZa01/stepcap.git
 cd stepcap
+```
+
+<img src="docs/images/setup-2.svg" width="600" alt="PowerShell: git clone แล้ว cd stepcap">
+
+**3. สร้าง venv แล้วลงไลบรารี**
+
+```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 ```
 
-## เปิดใช้งาน
+ขึ้น `Successfully installed ...` แปลว่าเสร็จ
+
+<img src="docs/images/setup-3.svg" width="600" alt="PowerShell: python -m venv แล้ว pip install ขึ้น Successfully installed">
+
+**4. เปิด StepCap**
 
 ```powershell
 .venv\Scripts\pythonw.exe app.py
 ```
+
+หน้าต่าง StepCap จะเปิดขึ้นมา (terminal ไม่แสดงอะไรต่อ) ถ้ามี StepCap ที่ติดตั้งจากไฟล์ exe เปิดอยู่ ให้ปิดก่อน เพราะทั้งสองใช้โฟลเดอร์คู่มือเดียวกันและเปิดพร้อมกันไม่ได้
+
+<img src="docs/images/setup-4.svg" width="600" alt="PowerShell: สั่ง pythonw.exe app.py">
+
+<img src="docs/images/home.png" width="360" alt="หน้าต่าง StepCap ที่เปิดขึ้นมา">
+
+ครั้งต่อไปเปิดได้ด้วยคำสั่งขั้นที่ 4 จากโฟลเดอร์ `stepcap`
+
+### หลังติดตั้ง
 
 กดปุ่ม X แล้ว StepCap จะย่อไปอยู่ที่ไอคอนสีส้มในแถบ tray ที่มุมขวาล่าง ถ้าจะปิดโปรแกรมจริงให้คลิกขวาที่ไอคอนนั้นแล้วเลือก "ออก"
 
