@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+build/
+dist/
+# kept local only: tests, specs/plans (refs/ has personal screenshots), installer build
+test_*.py
+docs/specs/
+docs/plans/
+build.py
+installer/
+requirements-build.txt
