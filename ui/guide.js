@@ -378,8 +378,15 @@ async function saveNow() {
   return ok;
 }
 function scheduleSave() { clearTimeout(SAVET); SAVET = setTimeout(saveNow, 500); }
+// Uploads and blur passes still running: a save before they finish would leave
+// out the new step or export a picture before its blurs are on.
+const BUSY = new Set();
+function track(p) { const done = () => BUSY.delete(p); BUSY.add(p); p.then(done, done); return p; }
 // true when nothing is left unsaved; callers stay on the page otherwise
-const flush = async () => !SAVET || await saveNow();
+async function flush() {
+  while (BUSY.size) await Promise.allSettled([...BUSY]);
+  return !SAVET || await saveNow();
+}
 
 function editPage() {
   app.innerHTML = `<header class="gtop">
@@ -518,7 +525,8 @@ async function uploadImage(blob) {
 // runs even with the setting off. before() runs only when something will be
 // added (the editor's undo point). Returns how many were added, or null after
 // saying why the image could not be checked.
-async function autoRedact(step, force, before) {
+function autoRedact(step, force, before) { return track(autoRedactNow(step, force, before)); }
+async function autoRedactNow(step, force, before) {
   const image = step.image;
   let res;
   try {
@@ -536,7 +544,8 @@ async function autoRedact(step, force, before) {
   return res.rects.length;
 }
 
-async function addImageStep(blob) {
+function addImageStep(blob) { return track(addImageStepNow(blob)); }
+async function addImageStepNow(blob) {
   const image = await uploadImage(blob);
   if (!image) return;
   const step = {id: newStepId(), kind: "image", text: "", image,

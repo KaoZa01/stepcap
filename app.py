@@ -694,7 +694,15 @@ def save_as(filename: str, data: bytes, file_type: str) -> str | None:
     path = res[0] if isinstance(res, (list, tuple)) and res else res
     if not path:
         return None
-    Path(path).write_bytes(data)
+    # write next to it, then swap: a failed write never leaves a half file
+    # in place of the one the user chose to overwrite
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
     return str(path)
 
 
