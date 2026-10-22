@@ -105,17 +105,30 @@ function closeImageEditor() {
   document.querySelector(`#edit-${sid} .ed`)?.focus();  // back where the editor was opened
 }
 
+// The failure note sits beside the canvas (never replaces it), so undo or a
+// new picture after a failed load still draws; a superseded load is ignored.
 function iedLoad() {
   return new Promise(resolve => {
     const img = new Image();
+    IED.loading = img;
+    const current = () => IED.open && IED.loading === img;
+    const fail = on => {
+      const stage = document.querySelector(".ied-stage");
+      IED.canvas.hidden = on;
+      stage.querySelector(".imgfail")?.remove();
+      if (on) stage.insertAdjacentHTML("beforeend", '<div class="imgfail">' + esc(tr("เปิดภาพนี้ไม่ได้")) + "</div>");
+    };
     img.onload = () => {
-      IED.img = img;
-      if (iedGif()) { IED.tool = "select"; IED.draft = null; }  // GIFs stay unedited
-      iedLayout(); iedTools(); iedOpts(); resolve();
+      if (current()) {
+        fail(false);
+        IED.img = img;
+        if (iedGif()) { IED.tool = "select"; IED.draft = null; }  // GIFs stay unedited
+        iedLayout(); iedTools(); iedOpts();
+      }
+      resolve();
     };
     img.onerror = () => {
-      IED.img = null;
-      document.querySelector(".ied-stage").innerHTML = '<div class="imgfail">' + esc(tr("เปิดภาพนี้ไม่ได้")) + "</div>";
+      if (current()) { IED.img = null; fail(true); }
       resolve();
     };
     img.src = imgUrl(GID, IED.step.image);
@@ -425,7 +438,8 @@ function iedUndo() {
 
 // A new picture for this step: overlays belong to the old one, so they go
 // (undo brings both back; the old file stays on disk).
-async function iedReplace(blob) {
+function iedReplace(blob) { return track(iedReplaceNow(blob)); }
+async function iedReplaceNow(blob) {
   const name = await uploadImage(blob);
   if (!name) return false;
   iedPush();
